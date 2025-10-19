@@ -90,10 +90,9 @@
 
     // Load external libs (HTTP-first): PrayTimes + GeoPlugin
 	const loadLibs = Promise.all([
-	loadExternalScriptOnce(httpSafe('praytimes.org/code/v2/js/PrayTimes.js'), () => typeof prayTimes !== 'undefined'),
-	loadExternalScriptOnce(httpSafe('www.geoplugin.net/javascript.gp'), () => typeof geoplugin_countryCode === 'function')
-		.catch(() => {})
+		loadExternalScriptOnce(httpSafe('praytimes.org/code/v2/js/PrayTimes.js'), () => typeof prayTimes !== 'undefined')
 	]);
+
 
     function renderRows(){
       if (!state.times) return;
@@ -125,13 +124,9 @@
       try {
         await loadLibs;
         // Try to reuse cached coords from settings later if you want; for now, do fresh IP race
-        const ip = await ipGeoRace(4500);
-        if (ip){
-          state.lat = ip.lat; state.lng = ip.lng; state.country = ip.country || 'NA'; state.source = ip.source || '';
-        } else {
-          // hard fallback Cairo
-          state.lat = 30.0444; state.lng = 31.2357; state.country = 'EG'; state.source = 'CairoFallback';
-        }
+		const geo = await window.getBestGeo({ ipTimeoutMs: 4500 });
+		state.lat = geo.lat; state.lng = geo.lng; state.country = geo.country || 'NA'; state.source = geo.source || '';
+		await refresh();
         await refresh();
       } catch(err){
         statusEl.textContent = 'Could not load prayer time dependencies.';

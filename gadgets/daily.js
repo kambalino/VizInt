@@ -116,8 +116,7 @@
 
 	// Load PrayTimes + GeoPlugin (protocol-safe)
 	const libs = Promise.all([
-		loadExternalScriptOnce(httpSafe('praytimes.org/code/v2/js/PrayTimes.js'), ()=> typeof prayTimes!=='undefined'),
-		loadExternalScriptOnce(httpSafe('www.geoplugin.net/javascript.gp'), ()=> typeof geoplugin_countryCode==='function').catch(()=>{})
+		loadExternalScriptOnce(httpSafe('praytimes.org/code/v2/js/PrayTimes.js'), ()=> typeof prayTimes!=='undefined')
 	]);
 
     function computeTargets(){
@@ -187,11 +186,8 @@
         await libs;
         // IP geo (race); if both fail, Cairo
         const ip = await ipGeoRace(4500);
-        if (ip) {
-          state.lat = ip.lat; state.lng = ip.lng; state.country = ip.country || 'NA'; state.source = ip.source || '';
-        } else {
-          state.lat = 30.0444; state.lng = 31.2357; state.country = 'EG'; state.source = 'CairoFallback';
-        }
+		const geo = await window.getBestGeo({ ipTimeoutMs: 4500 });
+		state.lat = geo.lat; state.lng = geo.lng; state.country = geo.country || 'NA'; state.source = geo.source || '';
         state.method = pickMethod(state.country, state.lat, state.lng);
         computeTargets();
         render();
