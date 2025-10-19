@@ -43,25 +43,7 @@
       })();
     });
   }
-  // Geo: provider 2 (ip-api JSONP)
-  function ipApiJSONP(maxWaitMs=4000){
-    return new Promise(resolve=>{
-      const cb = 'ipcb_'+Date.now()+'_'+Math.floor(Math.random()*1e6);
-      const done = v=>{ try{ delete window[cb]; }catch{} resolve(v); };
-      window[cb] = resp=>{
-        if (resp && resp.status==='success' && isFinite(resp.lat) && isFinite(resp.lon)){
-          done({lat:resp.lat, lng:resp.lon, country:(resp.countryCode||'NA'), source:'ip-api'});
-        } else done(null);
-      };
-      const s = document.createElement('script');
-	  // http/s independence fix
-	  s.src = (location.protocol === 'file:' ? 'https:' : '') + '//ip-api.com/json/?fields=status,countryCode,lat,lon&callback=' + cb;
-
-      s.onerror = ()=> done(null);
-      document.head.appendChild(s);
-      setTimeout(()=>done(null), maxWaitMs);
-    });
-  }
+  
   // Race both IP providers, take first success
   async function ipGeoRace(totalMs=4500){
     const timeout = new Promise(r=>setTimeout(()=>r(null), totalMs));

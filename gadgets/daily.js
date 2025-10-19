@@ -50,22 +50,8 @@
       })();
     });
   }
-  function ipApiJSONP(maxWaitMs=4000){
-    return new Promise(resolve=>{
-      const cb = 'ipcb_'+Date.now()+'_'+Math.floor(Math.random()*1e6);
-      const done = v=>{ try{ delete window[cb]; }catch{} resolve(v); };
-      window[cb] = resp=>{
-        if (resp && resp.status==='success' && isFinite(resp.lat) && isFinite(resp.lon)){
-          done({lat:resp.lat, lng:resp.lon, country:(resp.countryCode||'NA'), source:'ip-api'});
-        } else done(null);
-      };
-      const s = document.createElement('script');
-      s.src = 'http://ip-api.com/json/?fields=status,countryCode,lat,lon&callback='+cb;
-      s.onerror = ()=> done(null);
-      document.head.appendChild(s);
-      setTimeout(()=>done(null), maxWaitMs);
-    });
-  }
+// ✅ HTTPS + local-safe IP-based geolocation
+
   async function ipGeoRace(totalMs=4500){
     const timeout = new Promise(r=>setTimeout(()=>r(null), totalMs));
     const p1 = getIPGeoFromGeoPlugin(totalMs-200);
@@ -186,7 +172,14 @@
 
       rowsEl.innerHTML = html;
       badge.textContent = state.weekend ? 'Weekend' : 'Weekday';
-      mini.textContent  = `Method: ${state.method} · Country: ${state.country} · Lat: ${state.lat.toFixed(3)}, Lng: ${state.lng.toFixed(3)}${state.source ? ' · Source: '+state.source : ''}`;
+	  
+		// ✅ Guard to avoid toFixed() crash when lat/lng not yet resolved
+		if (state.lat == null || state.lng == null || isNaN(state.lat) || isNaN(state.lng)) {
+		mini.textContent = 'Location unavailable';
+		return;
+		}
+
+		mini.textContent  = `Method: ${state.method} · Country: ${state.country} · Lat: ${state.lat.toFixed(3)}, Lng: ${state.lng.toFixed(3)}${state.source ? ' · Source: '+state.source : ''}`;
     }
 
     async function boot(){
