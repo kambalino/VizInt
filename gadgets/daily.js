@@ -128,11 +128,11 @@
       weekend: false
     };
 
-    // Load PrayTimes + GeoPlugin (HTTP-first)
-    const libs = Promise.all([
-      loadExternalScriptOnce('http://praytimes.org/code/v2/js/PrayTimes.js', ()=> typeof prayTimes!=='undefined'),
-      loadExternalScriptOnce('http://www.geoplugin.net/javascript.gp', ()=> typeof geoplugin_countryCode==='function').catch(()=>{})
-    ]);
+	// Load PrayTimes + GeoPlugin (protocol-safe)
+	const libs = Promise.all([
+		loadExternalScriptOnce(httpSafe('praytimes.org/code/v2/js/PrayTimes.js'), ()=> typeof prayTimes!=='undefined'),
+		loadExternalScriptOnce(httpSafe('www.geoplugin.net/javascript.gp'), ()=> typeof geoplugin_countryCode==='function').catch(()=>{})
+	]);
 
     function computeTargets(){
       const now = new Date();

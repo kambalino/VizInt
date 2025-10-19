@@ -54,7 +54,9 @@
         } else done(null);
       };
       const s = document.createElement('script');
-      s.src = 'http://ip-api.com/json/?fields=status,countryCode,lat,lon&callback='+cb;
+	  // http/s independence fix
+	  s.src = (location.protocol === 'file:' ? 'https:' : '') + '//ip-api.com/json/?fields=status,countryCode,lat,lon&callback=' + cb;
+
       s.onerror = ()=> done(null);
       document.head.appendChild(s);
       setTimeout(()=>done(null), maxWaitMs);
@@ -105,11 +107,11 @@
     const state = { lat:null, lng:null, country:'NA', method:'MWL', source:'', times:null };
 
     // Load external libs (HTTP-first): PrayTimes + GeoPlugin
-    const loadLibs = Promise.all([
-      loadExternalScriptOnce('http://praytimes.org/code/v2/js/PrayTimes.js', ()=> typeof prayTimes!=='undefined'),
-      loadExternalScriptOnce('http://www.geoplugin.net/javascript.gp', ()=> typeof geoplugin_countryCode==='function')
-      .catch(()=>{}) // ip-api will cover if this fails
-    ]);
+	const loadLibs = Promise.all([
+	loadExternalScriptOnce(httpSafe('praytimes.org/code/v2/js/PrayTimes.js'), () => typeof prayTimes !== 'undefined'),
+	loadExternalScriptOnce(httpSafe('www.geoplugin.net/javascript.gp'), () => typeof geoplugin_countryCode === 'function')
+		.catch(() => {})
+	]);
 
     function renderRows(){
       if (!state.times) return;
