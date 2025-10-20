@@ -27,9 +27,7 @@ try {
   // 1️⃣ Find the last tag matching ver-*
   let lastTag = "";
   try {
-	const allTags = runSilent(`git tag --sort=-creatordate`).split("\n").filter(Boolean);
-	const lastTag = allTags[0];
-
+    lastTag = run("git describe --tags --match 'ver-*' --abbrev=0");
   } catch {
     console.log("No previous version tag found. Starting fresh at #000.");
   }
@@ -56,7 +54,7 @@ try {
 
   // 4️⃣ Update $VER line
   hist = hist.replace(
-    /(window\.VIZINT_VERSION\s*=\s*'\$VER:\s*#)[0-9]+[^\n']*(';?)/,
+    /(window\.VIZINT_VERSION\s*=\s*'\$VER:\s*#)[0-9]+[^\n']*(';?)/
     `$1${nextNum}$2`
   );
 
