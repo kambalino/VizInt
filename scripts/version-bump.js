@@ -15,13 +15,15 @@ function run(cmd) {
   return execSync(cmd, { encoding: "utf8" }).trim();
 }
 
-// Escape quotes and backslashes so commit messages stay valid JS strings
 function safeString(str) {
   return str
-    .replace(/\\/g, '\\\\')   // backslashes first
-    .replace(/'/g, "\\'")     // single quotes
-    .replace(/\r?\n/g, ' ');  // remove line breaks
+    .replace(/\\/g, '\\\\') // real backslashes still need escaping
+    .replace(/'/g, "\\'")   // only single quotes need escaping
+    .replace(/\r?\n/g, ' ') // collapse newlines
+    .replace(/\s+/g, ' ')   // normalize whitespace
+    .trim();
 }
+
 
 try {
   // 1️⃣ Find the last tag matching ver-*
