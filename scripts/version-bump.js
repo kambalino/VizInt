@@ -10,7 +10,6 @@ if (process.env.GIT_DIR && process.env.GIT_DIR.includes('.git/hooks')) {
 const { execSync, spawnSync } = require("child_process");
 
 const fs = require("fs");
-const { execSync } = require("child_process");
 
 function run(cmd) {
   return execSync(cmd, { encoding: "utf8" }).trim();
@@ -85,9 +84,6 @@ try {
 
 	spawnSync("git", ["add", "lib/history.js"], { stdio: "inherit" });
 	spawnSync("git", ["commit", "-m", `Auto: version bump to ${verLabel}`], { stdio: "inherit" });
-
-	// small delay so VS Code Git watcher can re-index
-	await new Promise(r => setTimeout(r, 1000));
 
 	console.log("✅ Safe commit complete — VS Code should pick this up automatically.");
 
