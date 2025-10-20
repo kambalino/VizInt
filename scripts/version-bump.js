@@ -54,7 +54,7 @@ try {
 
   // 4️⃣ Update $VER line
   hist = hist.replace(
-    /(window\.VIZINT_VERSION\s*=\s*'\$VER:\s*#)[0-9]+[^\n']*(';?)/
+    /(window\.VIZINT_VERSION\s*=\s*'\$VER:\s*#)[0-9]+[^\n']*(';?)/,
     `$1${nextNum}$2`
   );
 
