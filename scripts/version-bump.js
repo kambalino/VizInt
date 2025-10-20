@@ -11,6 +11,14 @@ function run(cmd) {
   return execSync(cmd, { encoding: "utf8" }).trim();
 }
 
+// Escape quotes and backslashes so commit messages stay valid JS strings
+function safeString(str) {
+  return str
+    .replace(/\\/g, '\\\\')   // backslashes first
+    .replace(/'/g, "\\'")     // single quotes
+    .replace(/\r?\n/g, ' ');  // remove line breaks
+}
+
 try {
   // 1️⃣ Find the last tag matching ver-*
   let lastTag = "";
@@ -42,16 +50,16 @@ try {
 
   // 4️⃣ Update $VER line
   hist = hist.replace(
-    /(window\.VIZINT_VERSION\s*=\s*'\$VER:\s*#)\d+(\+?';?)/,
+    /(window\.VIZINT_VERSION\s*=\s*'\$VER:\s*#)[0-9]+[^\n']*(';?)
     `$1${nextNum}$2`
   );
 
   // 5️⃣ Insert new HISTORY entry
   const entry = {
-    ver: verLabel,
-    title: commits[0],
-    bullets: commits,
-    status: "Auto-generated"
+	ver: verLabel,
+	title: safeString(commits[0]),
+	bullets: commits.map(safeString),
+	status: 'Auto-generated'
   };
 
   const insertBlock = JSON.stringify(entry, null, 2)
