@@ -4,6 +4,8 @@
  * and appends new commits to window.VIZINT_HISTORY in history.js.
  */
 
+const { execSync, spawnSync } = require("child_process");
+
 const fs = require("fs");
 const { execSync } = require("child_process");
 
@@ -75,12 +77,16 @@ try {
   run(`git tag ${verTag}`);
   console.log(`🏷️ Tag created: ${verTag}`);
 
-  // 7️⃣ Commit
-  run("git add lib/history.js");
-  run(`git commit -m "Auto: version bump to ${verLabel}"`);
-  console.log("✅ Changes committed");
+  // 7️⃣ Stage & commit safely
+	console.log("🟢 Performing safe Git commit inside VS Code...");
 
-  console.log("\n🚀 Done! Push with:\n  git push && git push --tags\n");
+	spawnSync("git", ["add", "lib/history.js"], { stdio: "inherit" });
+	spawnSync("git", ["commit", "-m", `Auto: version bump to ${verLabel}`], { stdio: "inherit" });
+
+	// small delay so VS Code Git watcher can re-index
+	await new Promise(r => setTimeout(r, 1000));
+
+	console.log("✅ Safe commit complete — VS Code should pick this up automatically.");
 
 } catch (err) {
   console.error("❌ Error:", err.message);
