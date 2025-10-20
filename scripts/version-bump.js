@@ -32,8 +32,9 @@ try {
 	try {
 	const allTags = runSilent(`git tag --match 'ver-*' --sort=creatordate`).filter(Boolean);
 	lastTag = allTags[0]; // ✅ Assign to the outer scope
+	console.log(`allTags ${allTags[0]}& lastTag ${lastTag}  #000.`);
 	} catch {
-	console.log("No previous version tag found. Starting fresh at #000.");
+	console.log("🐛No previous version tag found. Starting fresh at #000.");
 	}
 
   // 2️⃣ Determine new commits since last tag
