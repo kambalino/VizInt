@@ -3,6 +3,9 @@
  * Auto-increments version (#NNN), updates window.VIZINT_VERSION,
  * and appends new commits to window.VIZINT_HISTORY in history.js.
  */
+if (process.env.GIT_DIR && process.env.GIT_DIR.includes('.git/hooks')) {
+  console.log("⚠️ Running from hook...");
+}
 
 const { execSync, spawnSync } = require("child_process");
 
