@@ -18,7 +18,7 @@ function run(cmd) {
 function safeString(str) {
   return str
     .replace(/\\/g, '\\\\') // real backslashes still need escaping
-    .replace(/'/g, "\\'")   // only single quotes need escaping
+    .replace(/'/g, "\'")   // only single quotes need escaping
     .replace(/\r?\n/g, ' ') // collapse newlines
     .replace(/\s+/g, ' ')   // normalize whitespace
     .trim();
@@ -27,6 +27,17 @@ function safeString(str) {
 
 try {
   // 1️⃣ Find the last tag matching ver-*
+
+let lastTag = "";
+try {
+  const allTags = runSilent(`git tag --sort=creatordate`).filter(Boolean);
+  lastTag = allTags[0]; // ✅ Assign to the outer scope
+} catch {
+  console.log("No previous version tag found. Starting fresh at #000.");
+}
+
+
+
   let lastTag = "";
   try {
     lastTag = run("git describe --tags --match 'ver-*' --abbrev=0");
