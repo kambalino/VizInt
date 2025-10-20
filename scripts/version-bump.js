@@ -28,22 +28,13 @@ function safeString(str) {
 try {
   // 1️⃣ Find the last tag matching ver-*
 
-let lastTag = "";
-try {
-  const allTags = runSilent(`git tag --sort=creatordate`).filter(Boolean);
-  lastTag = allTags[0]; // ✅ Assign to the outer scope
-} catch {
-  console.log("No previous version tag found. Starting fresh at #000.");
-}
-
-
-
-  let lastTag = "";
-  try {
-    lastTag = run("git describe --tags --match 'ver-*' --abbrev=0");
-  } catch {
-    console.log("No previous version tag found. Starting fresh at #000.");
-  }
+	let lastTag = "";
+	try {
+	const allTags = runSilent(`git tag --match 'ver-*' --sort=creatordate`).filter(Boolean);
+	lastTag = allTags[0]; // ✅ Assign to the outer scope
+	} catch {
+	console.log("No previous version tag found. Starting fresh at #000.");
+	}
 
   // 2️⃣ Determine new commits since last tag
   const logRange = lastTag ? `${lastTag}..HEAD` : "";
