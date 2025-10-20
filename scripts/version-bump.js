@@ -15,6 +15,15 @@ function run(cmd) {
   return execSync(cmd, { encoding: "utf8" }).trim();
 }
 
+function runSilent(cmd) {
+  try {
+    return execSync(cmd, { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] }).trim();
+  } catch {
+    return "";
+  }
+}
+
+
 function safeString(str) {
   return str
     .replace(/\\/g, '\\\\') // real backslashes still need escaping
@@ -29,13 +38,20 @@ try {
   // 1️⃣ Find the last tag matching ver-*
 
 	let lastTag = "";
+
 	try {
-	const allTags = runSilent(`git tag --match 'ver-*' --sort=creatordate`).filter(Boolean);
-	lastTag = allTags[0]; // ✅ Assign to the outer scope
-	console.log(`allTags ${allTags[0]}& lastTag ${lastTag}  #000.`);
-	} catch {
-	console.log("🐛No previous version tag found. Starting fresh at #000.");
+	const allTagsOutput = runSilent(`git tag --sort=-creatordate`);
+	const allTags = allTagsOutput.split("\n").filter(tag => tag.startsWith("ver-") && tag.trim());
+	lastTag = allTags[allTags.length - 1]; // Because creatordate is ascending (oldest first)
+	
+	console.log(`📋 All tags (sorted by creation date): ${allTags.join(", ")}`);
+	console.log(`🕐 Selected last tag: ${lastTag}`);
+
+	} catch (err) {
+	console.log("🐛 No previous version tag found. Starting fresh at #000.");
+	console.log("🐞 Exception:", err.message);
 	}
+
 
   // 2️⃣ Determine new commits since last tag
   const logRange = lastTag ? `${lastTag}..HEAD` : "";
