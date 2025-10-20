@@ -78,8 +78,13 @@ try {
   console.log("✅ lib/history.js updated");
 
   // 6️⃣ Tag this commit
-  run(`git tag ${verTag}`);
-  console.log(`🏷️ Tag created: ${verTag}`);
+	const existingTags = run(`git tag`);
+	if (existingTags.split("\n").includes(verTag)) {
+	console.log(`⚠️  Tag ${verTag} already exists — skipping creation`);
+	} else {
+	execSync(`git tag ${verTag}`);
+	console.log(`🏷️ Tag created: ${verTag}`);
+	}
 
   // 7️⃣ Stage & commit safely
 	console.log("🟢 Performing safe Git commit inside VS Code...");
