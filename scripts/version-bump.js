@@ -27,7 +27,7 @@ function runSilent(cmd) {
 function safeString(str) {
   return str
     .replace(/\\/g, '\\\\') // real backslashes still need escaping
-    .replace(/'/g, '`')   // only single quotes need escaping
+    .replace(/'/g, '`')   // only single quotes need escaping - this is a cop-out via backticks, until we figure out a non-recursive escape for single-quote
     .replace(/\r?\n/g, ' ') // collapse newlines
     .replace(/\s+/g, ' ')   // normalize whitespace
     .trim();

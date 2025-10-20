@@ -82,3 +82,45 @@ button, select, input[type="number"], input[type="checkbox"] { padding:6px; }
   padding-top: 4px;                /* slightly tighter */
   padding-bottom: 4px;             /* slightly tighter */
 }
+
+
+/* --- Generic row presentation, supporting highlights for gadgets --- */
+.g-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 6px;
+  transition: background 0.8s ease, box-shadow 0.8s ease;
+}
+
+.g-row.active {
+  background: rgba(11, 95, 255, 0.12);
+  box-shadow: 0 0 6px rgba(11, 95, 255, 0.35);
+  border-radius: 6px;
+}
+
+.g-label { flex: 1; text-align: left; }
+.g-marker {
+  width: 1.2em;
+  text-align: center;
+  color: var(--accent, #0b5fff);
+  opacity: 0;
+  transition: opacity 0.8s ease;
+}
+.g-row.active .g-marker { opacity: 1; }
+
+.g-value {
+  flex: 0 0 4.4em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.g-subvalue {
+  display: flex;
+  justify-content: space-between;
+  margin-left: 2em;
+  margin-right: 0.2em;
+  font-size: 0.85em;
+  color: #777;
+}

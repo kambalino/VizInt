@@ -94,22 +94,90 @@
 	]);
 
 
-    function renderRows(){
-      if (!state.times) return;
-      const t = state.times;
-      const L = [
-        ['Fajr','الفجر', t.fajr],
-        ['Sunrise','الشروق', t.sunrise],
-        ['Dhuhr','الظهر', t.dhuhr],
-        ['Asr','العصر', t.asr],
-        ['Maghrib','المغرب', t.maghrib],
-        ['Isha','العشاء', t.isha]
-      ];
-      rowsEl.innerHTML = L.map(([en,ar,val]) =>
-        `<div class="row"><div class="label">${en} (${ar})</div><div class="status">${to12h(val)}</div></div>`
-      ).join('');
-      statusEl.textContent = `Method: ${state.method} · Country: ${state.country} · Lat: ${state.lat.toFixed(3)}, Lng: ${state.lng.toFixed(3)}${state.source ? ' · Source: '+state.source : ''}`;
+function renderRows(){
+  if (!state.times) return;
+
+  // helpers already defined above: to12h, pad2
+  const t = state.times;
+  const now = new Date();
+
+  // Build the ordered list with today's Date objects for comparison
+  const items = [
+    { key:'fajr',    en:'Fajr',    ar:'الفجر',   time: t.fajr },
+    { key:'sunrise', en:'Sunrise', ar:'الشروق',  time: t.sunrise },
+    { key:'dhuhr',   en:'Dhuhr',   ar:'الظهر',   time: t.dhuhr },
+    { key:'asr',     en:'Asr',     ar:'العصر',   time: t.asr },
+    { key:'maghrib', en:'Maghrib', ar:'المغرب',  time: t.maghrib },
+    { key:'isha',    en:'Isha',    ar:'العشاء',  time: t.isha }
+  ].map(r => {
+    const [hh, mm] = r.time.split(':').map(Number);
+    r.dt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
+    return r;
+  });
+
+  // Determine the "current" prayer (most recent ≤ now)
+  let currentIdx = items.findIndex(r => r.dt > now) - 1;
+  if (currentIdx < 0) currentIdx = items.length - 1;        // before Fajr → treat as Isha
+  const nextIdx = (currentIdx + 1) % items.length;          // after Isha → wraps to Fajr
+
+  // Render rows: arrow appears only on the current row (in the middle gap)
+  const html = items.map((r, idx) => {
+  const isActive = idx === currentIdx;
+  return `
+    <div class="g-row${isActive ? ' active' : ''}">
+      <div class="g-label">${r.en} (${r.ar})</div>
+      <div class="g-marker">${isActive ? '▶' : ''}</div>
+      <div class="g-value">${to12h(r.time)}</div>
+    </div>
+    ${isActive ? `
+      <div id="pt-countdown" class="g-subvalue">
+        <div>⏳ Time Left</div>
+        <div id="pt-remaining">--:--:--</div>
+      </div>` : ''}
+  `;
+  }).join('');
+
+  rowsEl.innerHTML = html;
+
+  // Status line (unchanged)
+  statusEl.textContent =
+    `Method: ${state.method} · Country: ${state.country} · ` +
+    `Lat: ${state.lat.toFixed(3)}, Lng: ${state.lng.toFixed(3)}` +
+    `${state.source ? ' · Source: ' + state.source : ''}`;
+
+  // Start / restart the 1s countdown for the NEXT prayer
+  if (state._ptCountdownTimer) clearInterval(state._ptCountdownTimer);
+
+  state._ptCountdownTimer = setInterval(() => {
+    const now2 = new Date();
+
+    // Next prayer Date (today, or tomorrow if already passed)
+    const next = new Date(now2);
+    const [nh, nm] = items[nextIdx].time.split(':').map(Number);
+    next.setHours(nh, nm, 0, 0);
+    if (next < now2) next.setDate(next.getDate() + 1);
+
+    let diff = Math.floor((next - now2) / 1000);
+    if (diff < 0) diff = 0;
+
+    const H = Math.floor(diff / 3600);
+    const M = Math.floor((diff % 3600) / 60);
+    const S = diff % 60;
+
+	const remaining = document.getElementById('pt-remaining');
+	if (remaining) {
+	remaining.textContent = `${String(H).padStart(2,'0')}:${String(M).padStart(2,'0')}:${String(S).padStart(2,'0')}`;
+	}
+
+
+    // When countdown hits zero, re-run refresh() to advance the highlight
+    if (diff === 0) {
+      clearInterval(state._ptCountdownTimer);
+      state._ptCountdownTimer = null;
+      refresh();
     }
+  }, 1000);
+}
 
     async function refresh(){
       const now = new Date();
