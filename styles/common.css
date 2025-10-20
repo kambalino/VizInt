@@ -43,13 +43,58 @@ button, select, input[type="number"], input[type="checkbox"] { padding:6px; }
 .g-title { font-weight:600; font-size:14px; }
 
 .g-actions { display:flex; align-items:center; gap:6px; }
+
+/* --- Universal button style --- */
 .gbtn {
-  border:1px solid rgba(0,0,0,0.12);
-  background:#fff; padding:2px 6px; border-radius:4px; cursor:pointer;
-  font-size:12px; line-height:1; min-width:24px; text-align:center;
+  border: 1px solid rgba(0,0,0,0.15);
+  background: var(--btn-bg, #f9f9f9);
+  color: var(--btn-fg, #111);
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.2;
+  min-width: 24px;
+  text-align: center;
+  transition: background 0.25s ease, color 0.25s ease, border-color 0.25s ease;
 }
-.gbtn:disabled { opacity:0.5; cursor:not-allowed; }
-.gbtn:hover { background:#f3f4f6; }
+
+.gbtn:hover {
+  background: var(--btn-bg-hover, #ececec);
+}
+
+/* Disabled state */
+.gbtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* --- Themed button palette --- */
+body:not(.dark) {
+  --btn-bg: #f9f9f9;
+  --btn-bg-hover: #ececec;
+  --btn-fg: #222;
+}
+
+body.dark {
+  --btn-bg: #2a2a2a;
+  --btn-bg-hover: #3a3a3a;
+  --btn-fg: #eaeaea;
+}
+
+/* Theme toggle icon button */
+.gbtn.g-theme {
+  font-size: 1.15em;
+  line-height: 1;
+  background: transparent;
+  border: none;
+  color: var(--btn-fg);
+}
+.gbtn.g-theme:hover {
+  background: var(--btn-bg-hover);
+  border-radius: 50%;
+}
+
 
 .g-body { /* where gadgets render */ }
 

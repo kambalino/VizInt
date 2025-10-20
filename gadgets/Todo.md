@@ -2,19 +2,24 @@
 
 ## VizInt:
 
-- [ ]	Support Dark Mode
-- [ ]	Permanently print $VER: 
+- [x]	Support Dark Mode
+	- [x]	Including for buttons
+- [x]	Permanently print $VER: 
 
 - [ ]	Support Multiple Instances of Gadgets that each have different contexts
 - [ ]	Support pop-up windows for History (some emoji?)
 - [ ]	Support pop-up windows for Encapsulated Settings in a ⚙️ button in the main VizInt Bar
-- [ ]	Support Banner Message queue
-	- [ ]	Top most rotates in Banner
-	- [ ]	Prior notifications show up in expanded view of the gadget
 - [ ]	Support changing favicons to reflect notifications from gadgets.
 - [ ]	Support 2x wide gadgets?
 - [ ]	Support title-bar based mouse movement
 - [ ]	Refactor vizint in to its own gadget?
+
+### VizInt IPC:
+- [ ]	Support Banner Message queue
+	- [ ]	Top most rotates in Banner
+	- [ ]	Prior notifications show up in expanded view of the gadget
+- [ ] 	Support messaging between gadgets and portal
+	- [ ]	Notifications can cause Favicon changes/flashes
 
 ## TimeRoad Gadget
 - [ ]	Personal feed via rss or csv
