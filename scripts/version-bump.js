@@ -40,7 +40,7 @@ try {
 	let lastTag = "";
 
 	try {
-	const allTagsOutput = runSilent(`git tag --sort=-creatordate`);
+	const allTagsOutput = runSilent(`git tag --sort=creatordate`);
 	const allTags = allTagsOutput.split("\n").filter(tag => tag.startsWith("ver-") && tag.trim());
 	lastTag = allTags[allTags.length - 1]; // Because creatordate is ascending (oldest first)
 	
