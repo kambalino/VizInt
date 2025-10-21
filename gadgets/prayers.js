@@ -88,6 +88,13 @@
 
     const state = { lat:null, lng:null, country:'NA', city:'', method:'MWL', source:'', times:null };
 
+	// --- Initialize diagnostics visibility flag ---
+	// Default = hidden (false), or load from VizInt settings if present.
+	const showDiagnostics = !!ctx.settings.prayersShowDiag;
+	const slot = host.closest('.gadget-slot');
+	if (slot) slot._showDiagnostics = showDiagnostics;
+
+
     // Load external libs (HTTP-first): PrayTimes + GeoPlugin
     const loadLibs = Promise.all([
       loadExternalScriptOnce(httpSafe('praytimes.org/code/v2/js/PrayTimes.js'), () => typeof prayTimes !== 'undefined')
@@ -136,11 +143,21 @@
 
       rowsEl.innerHTML = html;
 
-      // Status line (unchanged)
-      statusEl.textContent =
-        `Method: ${state.method} · Country: ${state.country} · ` +
-        `Lat: ${state.lat.toFixed(3)}, Lng: ${state.lng.toFixed(3)}` +
-        `${state.source ? ' · Source: ' + state.source : ''}`;
+		// Status line (now includes city when available)
+		statusEl.textContent =
+			`Method: ${state.method}` +
+			(state.city ? ` · City: ${state.city}` : '') +
+			` · Country: ${state.country}` +
+			` · Lat: ${state.lat.toFixed(3)}, Lng: ${state.lng.toFixed(3)}` +
+			`${state.source ? ' · Source: ' + state.source : ''}`;
+
+      // Apply persisted visibility toggle (if set by ℹ️ button)
+      const slot = host.closest('.gadget-slot');
+      if (slot && slot._showDiagnostics === false) {
+        statusEl.style.display = 'none';
+      } else {
+        statusEl.style.display = '';
+      }
 
       // Start / restart the 1s countdown for the NEXT prayer
       if (state._ptCountdownTimer) clearInterval(state._ptCountdownTimer);
@@ -229,14 +246,20 @@
     return ()=>{ clearInterval(halfHour); clearInterval(tick); };
   }
 
-  // 🆕 Info handler: toggles the status line visibility
-  function onInfoClick(ctx, { body }){
+    // 🆕 Info handler: toggles the status line visibility
+  function onInfoClick(ctx, { body }) {
+    // Find the persistent gadget state stored on the slot
+    const slot = body.closest('.gadget-slot');
+    if (!slot) return;
+
+    // Maintain a persistent flag across renders
+    slot._showDiagnostics = !slot._showDiagnostics;
+
+    // Find and update the status element if it exists
     const statusEl = body.querySelector('#pt-status');
-    if (!statusEl) return;
-    // Toggle between visible / hidden (persist across refreshes)
-    const hidden = statusEl.dataset.hidden === 'true';
-    statusEl.style.display = hidden ? '' : 'none';
-    statusEl.dataset.hidden = (!hidden).toString();
+    if (statusEl) {
+      statusEl.style.display = slot._showDiagnostics ? '' : 'none';
+    }
   }
 
   window.GADGETS = window.GADGETS || {};
