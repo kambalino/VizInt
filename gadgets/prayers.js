@@ -88,12 +88,11 @@
 
     const state = { lat:null, lng:null, country:'NA', city:'', method:'MWL', source:'', times:null };
 
-	// --- Initialize diagnostics visibility flag ---
-	// Default = hidden (false), or load from VizInt settings if present.
-	const showDiagnostics = !!ctx.settings.prayersShowDiag;
-	const slot = host.closest('.gadget-slot');
-	if (slot) slot._showDiagnostics = showDiagnostics;
-
+    // --- Initialize diagnostics visibility flag ---
+    // Default comes from VizInt portal: ctx.settings.showDiag (false by default)
+    // We still track per-slot toggling separately (for ℹ️ button)
+    const slot = host.closest('.gadget-slot');
+    if (slot) slot._showDiagnostics = !!ctx.settings.showDiag;
 
     // Load external libs (HTTP-first): PrayTimes + GeoPlugin
     const loadLibs = Promise.all([
@@ -105,7 +104,7 @@
       const t = state.times;
       const now = new Date();
 
-  // Build the ordered list with today's Date objects for comparison
+      // Build the ordered list with today's Date objects for comparison
       const items = [
         { key:'fajr',    en:'Fajr',    ar:'الفجر',   time: t.fajr },
         { key:'sunrise', en:'Sunrise', ar:'الشروق',  time: t.sunrise },
@@ -143,29 +142,22 @@
 
       rowsEl.innerHTML = html;
 
-		// Status line (now includes city when available)
-		statusEl.textContent =
-			`Method: ${state.method}` +
-			(state.city ? ` · City: ${state.city}` : '') +
-			` · Country: ${state.country}` +
-			` · Lat: ${state.lat.toFixed(3)}, Lng: ${state.lng.toFixed(3)}` +
-			`${state.source ? ' · Source: ' + state.source : ''}`;
+      // --- Method/diagnostic footer ---
+      statusEl.textContent =
+        `Method: ${state.method}` +
+        (state.city ? ` · City: ${state.city}` : '') +
+        ` · Country: ${state.country}` +
+        ` · Lat: ${state.lat.toFixed(3)}, Lng: ${state.lng.toFixed(3)}` +
+        `${state.source ? ' · Source: ' + state.source : ''}`;
 
-      // Apply persisted visibility toggle (if set by ℹ️ button)
-      const slot = host.closest('.gadget-slot');
-      if (slot && slot._showDiagnostics === false) {
-        statusEl.style.display = 'none';
-      } else {
-        statusEl.style.display = '';
-      }
+      // Visibility: hide unless either (a) global showDiag is true or (b) user toggled ℹ️ on
+      const visible = ctx.settings.showDiag || slot._showDiagnostics;
+      statusEl.style.display = visible ? '' : 'none';
 
-      // Start / restart the 1s countdown for the NEXT prayer
+      // --- Start / restart countdown ---
       if (state._ptCountdownTimer) clearInterval(state._ptCountdownTimer);
-
       state._ptCountdownTimer = setInterval(() => {
         const now2 = new Date();
-
-        // Next prayer Date (today, or tomorrow if already passed)
         const next = new Date(now2);
         const [nh, nm] = items[nextIdx].time.split(':').map(Number);
         next.setHours(nh, nm, 0, 0);
@@ -182,7 +174,7 @@
         if (remaining)
           remaining.textContent = `${String(H).padStart(2,'0')}:${String(M).padStart(2,'0')}:${String(S).padStart(2,'0')}`;
 
-        // When countdown hits zero, re-run refresh() to advance the highlight
+        // When countdown hits zero, re-run refresh() to advance highlight
         if (diff === 0) {
           clearInterval(state._ptCountdownTimer);
           state._ptCountdownTimer = null;
@@ -199,24 +191,23 @@
       renderRows();
     }
 
-    // Boot: load libs → get IP geo (race) → compute & render
+    // Boot: load libs → get IP geo → compute & render
     (async function boot(){
       try {
         await loadLibs;
-        // Try to reuse cached coords from settings later if you want; for now, do fresh IP race
         const geo = await window.getBestGeo({ ipTimeoutMs: 4500 });
 
-        // 🌆 Enhanced: if provider gives city, store it
-        state.lat = geo.lat; 
-        state.lng = geo.lng; 
-        state.country = geo.country || 'NA'; 
-        state.city = geo.city || ''; 
+        // 🌆 Enhanced: store geo context
+        state.lat = geo.lat;
+        state.lng = geo.lng;
+        state.country = geo.country || 'NA';
+        state.city = geo.city || '';
         state.source = geo.source || '';
 
-        await refresh(); 
+        await refresh();
         await refresh();
 
-        // 🌍 Update info tooltip once location known (include city if available)
+        // 🌍 Update ℹ️ tooltip with city and coordinates
         const cityLabel = state.city ? `${state.city}, ${state.country}` : `${state.country}`;
         const tooltipInfo = `${cityLabel} · Lat ${state.lat.toFixed(2)}, Lng ${state.lng.toFixed(2)}`;
 
@@ -226,16 +217,14 @@
           const btn = mySlot.querySelector('.gbtn.g-info');
           if (btn) btn.title = `Location: ${tooltipInfo}`;
         }
-        // ❌ Do NOT dispatch an update event — would cause flicker
       } catch(err){
         statusEl.textContent = 'Could not load prayer time dependencies.';
         console.error(err);
       }
     })();
 
-    // Periodic refresh (lightweight)
+    // Periodic refresh
     const halfHour = setInterval(refresh, 30*60*1000);
-    // Snap after midnight / when tab returns
     let lastDay = (new Date()).getDate();
     const tick = setInterval(()=>{
       const d = new Date().getDate();
@@ -246,19 +235,16 @@
     return ()=>{ clearInterval(halfHour); clearInterval(tick); };
   }
 
-    // 🆕 Info handler: toggles the status line visibility
+  // 🆕 Info handler: toggles the status line visibility (per-gadget only)
   function onInfoClick(ctx, { body }) {
-    // Find the persistent gadget state stored on the slot
     const slot = body.closest('.gadget-slot');
     if (!slot) return;
-
-    // Maintain a persistent flag across renders
     slot._showDiagnostics = !slot._showDiagnostics;
 
-    // Find and update the status element if it exists
     const statusEl = body.querySelector('#pt-status');
     if (statusEl) {
-      statusEl.style.display = slot._showDiagnostics ? '' : 'none';
+      const visible = ctx.settings.showDiag || slot._showDiagnostics;
+      statusEl.style.display = visible ? '' : 'none';
     }
   }
 
