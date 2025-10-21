@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Web Component Demo</title>
+<style>
+  :root {
+    --accent: #00bcd4;
+    --bg: #121212;
+    --fg: #f0f0f0;
+    font-family: system-ui, sans-serif;
+  }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    padding: 2em;
+  }
+</style>
+</head>
+<body>
+  <h1>Portal Host</h1>
+  <!-- Our custom tag -->
+  <vizint-hello></vizint-hello>
+  <vizint-hello></vizint-hello>
+
+  <script>
+    class VizintHello extends HTMLElement {
+      constructor() {
+        super();
+        // Option 1: use Shadow DOM (isolated)
+        const shadow = this.attachShadow({ mode: 'open' });
+        shadow.innerHTML = `
+          <style>
+            :host {
+              display:block;
+              padding:1em;
+              border:1px solid var(--accent);
+              border-radius:8px;
+              background:rgba(255,255,255,0.05);
+            }
+            button {
+              background: var(--accent);
+              color:white;
+              border:none;
+              padding:0.5em 1em;
+              border-radius:4px;
+            }
+          </style>
+          <div>
+            <p>Hello from <b>VizIntHello</b> component!</p>
+            <button>Click me</button>
+           <!-- /div -->
+        `;
+        this.button = shadow.querySelector('button');
+      }
+      connectedCallback() {
+        this.button.addEventListener('click', this.sayHi);
+      }
+      disconnectedCallback() {
+        this.button.removeEventListener('click', this.sayHi);
+      }
+      sayHi() {
+        alert('Hi there! Components work from file:// too.');
+      }
+    }
+
+    customElements.define('vizint-hello', VizintHello);
+
+  </script>
+</body>
+</html>
