@@ -86,7 +86,7 @@
     const statusEl = host.querySelector('#pt-status');
     const rowsEl   = host.querySelector('#pt-rows');
 
-    const state = { lat:null, lng:null, country:'NA', method:'MWL', source:'', times:null };
+    const state = { lat:null, lng:null, country:'NA', city:'', method:'MWL', source:'', times:null };
 
     // Load external libs (HTTP-first): PrayTimes + GeoPlugin
     const loadLibs = Promise.all([
@@ -188,18 +188,28 @@
         await loadLibs;
         // Try to reuse cached coords from settings later if you want; for now, do fresh IP race
         const geo = await window.getBestGeo({ ipTimeoutMs: 4500 });
-        state.lat = geo.lat; state.lng = geo.lng; state.country = geo.country || 'NA'; state.source = geo.source || '';
-        await refresh(); await refresh();
 
-        // 🌍 Update info tooltip once location known
-        const tooltipInfo = `${state.country || 'Unknown'} · Lat ${state.lat.toFixed(2)}, Lng ${state.lng.toFixed(2)}`;
-        // Update tooltip directly on the existing button if available
+        // 🌆 Enhanced: if provider gives city, store it
+        state.lat = geo.lat; 
+        state.lng = geo.lng; 
+        state.country = geo.country || 'NA'; 
+        state.city = geo.city || ''; 
+        state.source = geo.source || '';
+
+        await refresh(); 
+        await refresh();
+
+        // 🌍 Update info tooltip once location known (include city if available)
+        const cityLabel = state.city ? `${state.city}, ${state.country}` : `${state.country}`;
+        const tooltipInfo = `${cityLabel} · Lat ${state.lat.toFixed(2)}, Lng ${state.lng.toFixed(2)}`;
+
+        // Update tooltip directly on the existing ℹ️ button
         const mySlot = host.closest('.gadget-slot');
         if (mySlot) {
           const btn = mySlot.querySelector('.gbtn.g-info');
           if (btn) btn.title = `Location: ${tooltipInfo}`;
         }
-        // No dispatch here — avoid infinite re-render loop
+        // ❌ Do NOT dispatch an update event — would cause flicker
       } catch(err){
         statusEl.textContent = 'Could not load prayer time dependencies.';
         console.error(err);
