@@ -43,7 +43,7 @@
       })();
     });
   }
-  
+
   // Race both IP providers, take first success
   async function ipGeoRace(totalMs=4500){
     const timeout = new Promise(r=>setTimeout(()=>r(null), totalMs));
@@ -89,95 +89,90 @@
     const state = { lat:null, lng:null, country:'NA', method:'MWL', source:'', times:null };
 
     // Load external libs (HTTP-first): PrayTimes + GeoPlugin
-	const loadLibs = Promise.all([
-		loadExternalScriptOnce(httpSafe('praytimes.org/code/v2/js/PrayTimes.js'), () => typeof prayTimes !== 'undefined')
-	]);
+    const loadLibs = Promise.all([
+      loadExternalScriptOnce(httpSafe('praytimes.org/code/v2/js/PrayTimes.js'), () => typeof prayTimes !== 'undefined')
+    ]);
 
-
-function renderRows(){
-  if (!state.times) return;
-
-  // helpers already defined above: to12h, pad2
-  const t = state.times;
-  const now = new Date();
+    function renderRows(){
+      if (!state.times) return;
+      const t = state.times;
+      const now = new Date();
 
   // Build the ordered list with today's Date objects for comparison
-  const items = [
-    { key:'fajr',    en:'Fajr',    ar:'الفجر',   time: t.fajr },
-    { key:'sunrise', en:'Sunrise', ar:'الشروق',  time: t.sunrise },
-    { key:'dhuhr',   en:'Dhuhr',   ar:'الظهر',   time: t.dhuhr },
-    { key:'asr',     en:'Asr',     ar:'العصر',   time: t.asr },
-    { key:'maghrib', en:'Maghrib', ar:'المغرب',  time: t.maghrib },
-    { key:'isha',    en:'Isha',    ar:'العشاء',  time: t.isha }
-  ].map(r => {
-    const [hh, mm] = r.time.split(':').map(Number);
-    r.dt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
-    return r;
-  });
+      const items = [
+        { key:'fajr',    en:'Fajr',    ar:'الفجر',   time: t.fajr },
+        { key:'sunrise', en:'Sunrise', ar:'الشروق',  time: t.sunrise },
+        { key:'dhuhr',   en:'Dhuhr',   ar:'الظهر',   time: t.dhuhr },
+        { key:'asr',     en:'Asr',     ar:'العصر',   time: t.asr },
+        { key:'maghrib', en:'Maghrib', ar:'المغرب',  time: t.maghrib },
+        { key:'isha',    en:'Isha',    ar:'العشاء',  time: t.isha }
+      ].map(r => {
+        const [hh, mm] = r.time.split(':').map(Number);
+        r.dt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
+        return r;
+      });
 
   // Determine the "current" prayer (most recent ≤ now)
-  let currentIdx = items.findIndex(r => r.dt > now) - 1;
+      let currentIdx = items.findIndex(r => r.dt > now) - 1;
   if (currentIdx < 0) currentIdx = items.length - 1;        // before Fajr → treat as Isha
   const nextIdx = (currentIdx + 1) % items.length;          // after Isha → wraps to Fajr
 
   // Render rows: arrow appears only on the current row (in the middle gap)
-  const html = items.map((r, idx) => {
-  const isActive = idx === currentIdx;
-  return `
-    <div class="g-row${isActive ? ' active' : ''}">
-      <div class="g-label">${r.en} (${r.ar})</div>
-      <div class="g-marker">${isActive ? '▶' : ''}</div>
-      <div class="g-value">${to12h(r.time)}</div>
-    </div>
-    ${isActive ? `
-      <div id="pt-countdown" class="g-subvalue">
-        <div>⏳ Time Left</div>
-        <div id="pt-remaining">--:--:--</div>
-      </div>` : ''}
-  `;
-  }).join('');
+      const html = items.map((r, idx) => {
+        const isActive = idx === currentIdx;
+        return `
+          <div class="g-row${isActive ? ' active' : ''}">
+            <div class="g-label">${r.en} (${r.ar})</div>
+            <div class="g-marker">${isActive ? '▶' : ''}</div>
+            <div class="g-value">${to12h(r.time)}</div>
+          </div>
+          ${isActive ? `
+            <div id="pt-countdown" class="g-subvalue">
+              <div>⏳ Time Left</div>
+              <div id="pt-remaining">--:--:--</div>
+            </div>` : ''}
+        `;
+      }).join('');
 
-  rowsEl.innerHTML = html;
+      rowsEl.innerHTML = html;
 
   // Status line (unchanged)
-  statusEl.textContent =
-    `Method: ${state.method} · Country: ${state.country} · ` +
-    `Lat: ${state.lat.toFixed(3)}, Lng: ${state.lng.toFixed(3)}` +
-    `${state.source ? ' · Source: ' + state.source : ''}`;
+      statusEl.textContent =
+        `Method: ${state.method} · Country: ${state.country} · ` +
+        `Lat: ${state.lat.toFixed(3)}, Lng: ${state.lng.toFixed(3)}` +
+        `${state.source ? ' · Source: ' + state.source : ''}`;
 
   // Start / restart the 1s countdown for the NEXT prayer
-  if (state._ptCountdownTimer) clearInterval(state._ptCountdownTimer);
+      if (state._ptCountdownTimer) clearInterval(state._ptCountdownTimer);
 
-  state._ptCountdownTimer = setInterval(() => {
-    const now2 = new Date();
+      state._ptCountdownTimer = setInterval(() => {
+        const now2 = new Date();
 
     // Next prayer Date (today, or tomorrow if already passed)
-    const next = new Date(now2);
-    const [nh, nm] = items[nextIdx].time.split(':').map(Number);
-    next.setHours(nh, nm, 0, 0);
-    if (next < now2) next.setDate(next.getDate() + 1);
+        const next = new Date(now2);
+        const [nh, nm] = items[nextIdx].time.split(':').map(Number);
+        next.setHours(nh, nm, 0, 0);
+        if (next < now2) next.setDate(next.getDate() + 1);
 
-    let diff = Math.floor((next - now2) / 1000);
-    if (diff < 0) diff = 0;
+        let diff = Math.floor((next - now2) / 1000);
+        if (diff < 0) diff = 0;
 
-    const H = Math.floor(diff / 3600);
-    const M = Math.floor((diff % 3600) / 60);
-    const S = diff % 60;
+        const H = Math.floor(diff / 3600);
+        const M = Math.floor((diff % 3600) / 60);
+        const S = diff % 60;
 
-	const remaining = document.getElementById('pt-remaining');
-	if (remaining) {
-	remaining.textContent = `${String(H).padStart(2,'0')}:${String(M).padStart(2,'0')}:${String(S).padStart(2,'0')}`;
-	}
-
+        const remaining = document.getElementById('pt-remaining');
+        if (remaining)
+          remaining.textContent = `${String(H).padStart(2,'0')}:${String(M).padStart(2,'0')}:${String(S).padStart(2,'0')}`;
 
     // When countdown hits zero, re-run refresh() to advance the highlight
-    if (diff === 0) {
-      clearInterval(state._ptCountdownTimer);
-      state._ptCountdownTimer = null;
-      refresh();
+        if (diff === 0) {
+          clearInterval(state._ptCountdownTimer);
+          state._ptCountdownTimer = null;
+          refresh();
+        }
+      }, 1000);
     }
-  }, 1000);
-}
 
     async function refresh(){
       const now = new Date();
@@ -192,10 +187,15 @@ function renderRows(){
       try {
         await loadLibs;
         // Try to reuse cached coords from settings later if you want; for now, do fresh IP race
-		const geo = await window.getBestGeo({ ipTimeoutMs: 4500 });
-		state.lat = geo.lat; state.lng = geo.lng; state.country = geo.country || 'NA'; state.source = geo.source || '';
-		await refresh();
-        await refresh();
+        const geo = await window.getBestGeo({ ipTimeoutMs: 4500 });
+        state.lat = geo.lat; state.lng = geo.lng; state.country = geo.country || 'NA'; state.source = geo.source || '';
+        await refresh(); await refresh();
+
+        // 🌍 Update info tooltip once location known
+        const cityHint = `${state.country || 'Unknown'} @ ${state.lat.toFixed(2)}, ${state.lng.toFixed(2)}`;
+        window.GADGETS.prayers.info = `Location: ${cityHint}`;
+        // Notify loader to refresh tooltip (optional)
+        //ctx.bus.dispatchEvent(new CustomEvent('gadgets:update'));
       } catch(err){
         statusEl.textContent = 'Could not load prayer time dependencies.';
         console.error(err);
@@ -215,7 +215,18 @@ function renderRows(){
     return ()=>{ clearInterval(halfHour); clearInterval(tick); };
   }
 
-  // Attach gadget
+  // 🆕 Info handler: toggles the status line visibility
+  function onInfoClick(ctx, { body }){
+    const statusEl = body.querySelector('#pt-status');
+    if (!statusEl) return;
+    const hidden = statusEl.style.display === 'none';
+    statusEl.style.display = hidden ? '' : 'none';
+  }
+
   window.GADGETS = window.GADGETS || {};
-  window.GADGETS.prayers = { mount };
+  window.GADGETS.prayers = {
+    info: 'Determining location…',
+    mount,
+    onInfoClick
+  };
 })();
