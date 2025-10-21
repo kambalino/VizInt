@@ -59,6 +59,22 @@ button, select, input[type="number"], input[type="checkbox"] { padding:6px; }
   transition: background 0.25s ease, color 0.25s ease, border-color 0.25s ease;
 }
 
+/* Compact all gadget titlebar buttons */
+.g-titlebar .gbtn {
+  font-size: 11px;     /* smaller icons/text */
+  line-height: 1.1;
+  padding: 1px 4px;    /* tighter padding */
+  min-width: 18px;     /* narrower button width */
+  border-radius: 3px;  /* slightly rounder corners */
+}
+
+/* Optional: slightly tighten the titlebar itself */
+.g-titlebar {
+  gap: 4px;
+  padding: 4px 6px;
+}
+
+
 .gbtn:hover {
   background: var(--btn-bg-hover, #ececec);
 }

@@ -5,10 +5,13 @@
 - [x]	Support Dark Mode
 	- [x]	Including for buttons
 - [x]	Permanently print $VER: 
+- [x]	Support adding gadgets that reference external gadgets
+- [	]	Support generic blank gadget container with configurable/loadable content
 
 - [ ]	Support Multiple Instances of Gadgets that each have different contexts
 - [ ]	Support pop-up windows for History (some emoji?)
 - [ ]	Support pop-up windows for Encapsulated Settings in a ⚙️ button in the main VizInt Bar
+- [	]	Support info buttons for all gadgets
 - [ ]	Support changing favicons to reflect notifications from gadgets.
 - [ ]	Support 2x wide gadgets?
 - [ ]	Support title-bar based mouse movement
@@ -41,7 +44,7 @@
 - [ ]	Alternate the favicon to reflect changes in 
 
 ## NEW: World Time Zone Gadgets
-- [ ]	Support adding multiples
+- [ ]	Support adding multiple gadgets
 - [ ]	Support adding multiple cities per Gadgets
 - [ ]	Show City with 4 color attributes
 	- [ ]	Light / Dark
