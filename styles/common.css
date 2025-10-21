@@ -95,9 +95,23 @@ body.dark {
   border-radius: 50%;
 }
 
+/* Inner container where gadgets render their content */
+.g-body {
+  padding: 8px 10px;
+  overflow-y: auto;
+  max-height: 65vh; /* prevent runaway scroll for tall gadgets */
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
 
-.g-body { /* where gadgets render */ }
-
+/* Subtle animation when a gadget mounts */
+.g-body:empty {
+  opacity: 0.6;
+  font-style: italic;
+  color: var(--muted);
+  text-align: center;
+  padding: 12px;
+  content: "Loading…";
+}
 .g-minimized .g-body { display:none; }
 
 .g-maximized {

@@ -1,46 +1,62 @@
 (function(){
-  function mount(host, ctx){
-    const catalog = ctx.gadgetCatalog; // [{id,label},...]
-    const settings = ctx.getSettings();
-    const enabled = new Set(settings.enabledGadgets || []);
 
-    host.innerHTML = `
-      <div id="list"></div>
-      <div style="margin-top:8px">
-        <button id="save">Save</button>
-        <span id="note" class="muted" style="margin-left:8px;"></span>
-      </div>
-    `;
 
-    const list = host.querySelector('#list');
-    list.innerHTML = catalog.map(item=>{
-		const isSettings = item.id === 'settings';
-		const checked = (enabled.has(item.id) || isSettings) ? 'checked' : '';
-		const disabled = isSettings ? 'disabled' : '';
-		return `
-		<label style="display:flex; align-items:center; gap:8px; margin:4px 0;">
-			<input type="checkbox" data-id="${item.id}" ${checked} ${disabled}/>
-			<span>${item.label}${isSettings ? ' <span class="muted" style="font-size:11px;">(always on)</span>' : ''}</span>
-		</label>
-		`;
-    }).join('');
+	function mount(host, ctx) {
+  const { getSettings, setSettings, gadgetCatalog } = ctx;
+  const s = getSettings();
+  const enabled = new Set(s.enabledGadgets);
 
-	host.querySelector('#save').addEventListener('click', () => {
-		const boxes = Array.from(list.querySelectorAll('input[type="checkbox"]'));
-		const nextEnabled = boxes
-			.filter(b => b.checked || b.dataset.id === 'settings')   // ensure settings present
-			.map(b => b.dataset.id);
+  // skip header/settings from user control
+  const userGadgets = gadgetCatalog
+    .filter(g => g.id !== 'header' && g.id !== 'settings');
 
-		if (!nextEnabled.includes('settings')) nextEnabled.push('settings');
+  host.innerHTML = `
+    <h2>Gadgets</h2>
+    <ul id="orderList" style="list-style:none;padding:0;">
+      ${userGadgets.map(g => `
+        <li data-id="${g.id}"
+            style="display:flex;align-items:center;gap:6px;margin:4px 0;">
+          <input type="checkbox" ${enabled.has(g.id) ? 'checked' : ''}>
+          <span style="flex:1">${g.label}</span>
+			<button class="gbtn move-up">▲</button>
+			<button class="gbtn move-down">▼</button>
+        </li>
+      `).join('')}
+    </ul>
+  `;
 
-		const next = { ...settings, enabledGadgets: nextEnabled };
-		ctx.setSettings(next); // persists & triggers gadgets:update
-		const note = host.querySelector('#note');
-		note.textContent = 'Saved';
-		setTimeout(() => note.textContent = '', 1200);
-	});
+  const ul = host.querySelector('#orderList');
 
+  ul.addEventListener('click', e => {
+    if (!e.target.matches('button')) return;
+    const li = e.target.closest('li');
+    const items = [...ul.children];
+    const idx = items.indexOf(li);
+
+    if (e.target.classList.contains('move-up') && idx > 0)
+      ul.insertBefore(li, items[idx - 1]);
+    else if (e.target.classList.contains('move-down') && idx < items.length - 1)
+      ul.insertBefore(li, items[idx + 2] || null);
+
+    saveState();
+  });
+
+  ul.addEventListener('change', e => {
+    if (e.target.matches('input[type=checkbox]')) saveState();
+  });
+
+  function saveState() {
+    const newOrder = ['header'];
+    for (const li of ul.children) {
+      const id = li.dataset.id;
+      const checked = li.querySelector('input').checked;
+      if (checked) newOrder.push(id);
+    }
+    newOrder.push('settings');
+    setSettings({ enabledGadgets: newOrder });
+    window.dispatchEvent(new CustomEvent('gadgets:update', { detail:{enabled:newOrder} }));
   }
+}
 
   window.GADGETS = window.GADGETS || {};
   window.GADGETS.settings = {
