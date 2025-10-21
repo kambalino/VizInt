@@ -7,10 +7,17 @@
   const enabled = new Set(s.enabledGadgets);
 
 
-// preserve user-defined order, excluding header/settings
-const userGadgets = s.enabledGadgets
-  .map(id => gadgetCatalog.find(g => g.id === id))
-  .filter(g => g && g.id !== 'header' && g.id !== 'settings');
+	// preserve user-defined order and include any new gadgets
+	const knownIds = new Set(s.enabledGadgets);
+	const userGadgets = [
+		// existing ones in saved order
+		...s.enabledGadgets
+			.map(id => gadgetCatalog.find(g => g.id === id))
+			.filter(g => g && g.id !== 'header' && g.id !== 'settings'),
+		// any new ones not yet saved
+		...gadgetCatalog.filter(g =>
+			!knownIds.has(g.id) && g.id !== 'header' && g.id !== 'settings')
+	];
 
 
   host.innerHTML = `

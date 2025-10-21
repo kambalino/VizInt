@@ -6,12 +6,12 @@
 	- [x]	Including for buttons
 - [x]	Permanently print $VER: 
 - [x]	Support adding gadgets that reference external gadgets
+- [x]	Support info buttons for all gadgets
 - [	]	Support generic blank gadget container with configurable/loadable content
+- [ ]	Support pop-up windows for Encapsulated Settings in a ⚙️ button in the main VizInt Bar
 
 - [ ]	Support Multiple Instances of Gadgets that each have different contexts
 - [ ]	Support pop-up windows for History (some emoji?)
-- [ ]	Support pop-up windows for Encapsulated Settings in a ⚙️ button in the main VizInt Bar
-- [	]	Support info buttons for all gadgets
 - [ ]	Support changing favicons to reflect notifications from gadgets.
 - [ ]	Support 2x wide gadgets?
 - [ ]	Support title-bar based mouse movement
@@ -38,8 +38,8 @@
 
 
 ## Prayer Times:
+- [x]	Encapsulate city determination logic in [️ℹ️] button
 - [ ]	Support changing cities
-- [ ]	Encapsulate city determination logic in [️ℹ️] button
 - [ ]	Reflect city determination logic in Emoticon, based on most accurate, followed by more approximate etc.
 - [ ]	Alternate the favicon to reflect changes in 
 
