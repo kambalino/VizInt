@@ -6,9 +6,12 @@
   const s = getSettings();
   const enabled = new Set(s.enabledGadgets);
 
-  // skip header/settings from user control
-  const userGadgets = gadgetCatalog
-    .filter(g => g.id !== 'header' && g.id !== 'settings');
+
+// preserve user-defined order, excluding header/settings
+const userGadgets = s.enabledGadgets
+  .map(id => gadgetCatalog.find(g => g.id === id))
+  .filter(g => g && g.id !== 'header' && g.id !== 'settings');
+
 
   host.innerHTML = `
     <h2>Gadgets</h2>
@@ -34,9 +37,9 @@
     const idx = items.indexOf(li);
 
     if (e.target.classList.contains('move-up') && idx > 0)
-      ul.insertBefore(li, items[idx - 1]);
-    else if (e.target.classList.contains('move-down') && idx < items.length - 1)
-      ul.insertBefore(li, items[idx + 2] || null);
+    	ul.insertBefore(li, items[idx - 1]);
+	else if (e.target.classList.contains('move-down') && idx < items.length - 1)
+		ul.insertBefore(items[idx + 1], li);
 
     saveState();
   });
