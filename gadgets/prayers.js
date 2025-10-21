@@ -112,12 +112,12 @@
         return r;
       });
 
-  // Determine the "current" prayer (most recent ≤ now)
+      // Determine the "current" prayer (most recent ≤ now)
       let currentIdx = items.findIndex(r => r.dt > now) - 1;
-  if (currentIdx < 0) currentIdx = items.length - 1;        // before Fajr → treat as Isha
-  const nextIdx = (currentIdx + 1) % items.length;          // after Isha → wraps to Fajr
+      if (currentIdx < 0) currentIdx = items.length - 1;        // before Fajr → treat as Isha
+      const nextIdx = (currentIdx + 1) % items.length;          // after Isha → wraps to Fajr
 
-  // Render rows: arrow appears only on the current row (in the middle gap)
+      // Render rows: arrow appears only on the current row (in the middle gap)
       const html = items.map((r, idx) => {
         const isActive = idx === currentIdx;
         return `
@@ -136,19 +136,19 @@
 
       rowsEl.innerHTML = html;
 
-  // Status line (unchanged)
+      // Status line (unchanged)
       statusEl.textContent =
         `Method: ${state.method} · Country: ${state.country} · ` +
         `Lat: ${state.lat.toFixed(3)}, Lng: ${state.lng.toFixed(3)}` +
         `${state.source ? ' · Source: ' + state.source : ''}`;
 
-  // Start / restart the 1s countdown for the NEXT prayer
+      // Start / restart the 1s countdown for the NEXT prayer
       if (state._ptCountdownTimer) clearInterval(state._ptCountdownTimer);
 
       state._ptCountdownTimer = setInterval(() => {
         const now2 = new Date();
 
-    // Next prayer Date (today, or tomorrow if already passed)
+        // Next prayer Date (today, or tomorrow if already passed)
         const next = new Date(now2);
         const [nh, nm] = items[nextIdx].time.split(':').map(Number);
         next.setHours(nh, nm, 0, 0);
@@ -165,7 +165,7 @@
         if (remaining)
           remaining.textContent = `${String(H).padStart(2,'0')}:${String(M).padStart(2,'0')}:${String(S).padStart(2,'0')}`;
 
-    // When countdown hits zero, re-run refresh() to advance the highlight
+        // When countdown hits zero, re-run refresh() to advance the highlight
         if (diff === 0) {
           clearInterval(state._ptCountdownTimer);
           state._ptCountdownTimer = null;
@@ -192,10 +192,14 @@
         await refresh(); await refresh();
 
         // 🌍 Update info tooltip once location known
-        const cityHint = `${state.country || 'Unknown'} @ ${state.lat.toFixed(2)}, ${state.lng.toFixed(2)}`;
-        window.GADGETS.prayers.info = `Location: ${cityHint}`;
-        // Notify loader to refresh tooltip (optional)
-        //ctx.bus.dispatchEvent(new CustomEvent('gadgets:update'));
+        const tooltipInfo = `${state.country || 'Unknown'} · Lat ${state.lat.toFixed(2)}, Lng ${state.lng.toFixed(2)}`;
+        // Update tooltip directly on the existing button if available
+        const mySlot = host.closest('.gadget-slot');
+        if (mySlot) {
+          const btn = mySlot.querySelector('.gbtn.g-info');
+          if (btn) btn.title = `Location: ${tooltipInfo}`;
+        }
+        // No dispatch here — avoid infinite re-render loop
       } catch(err){
         statusEl.textContent = 'Could not load prayer time dependencies.';
         console.error(err);
@@ -219,8 +223,10 @@
   function onInfoClick(ctx, { body }){
     const statusEl = body.querySelector('#pt-status');
     if (!statusEl) return;
-    const hidden = statusEl.style.display === 'none';
+    // Toggle between visible / hidden (persist across refreshes)
+    const hidden = statusEl.dataset.hidden === 'true';
     statusEl.style.display = hidden ? '' : 'none';
+    statusEl.dataset.hidden = (!hidden).toString();
   }
 
   window.GADGETS = window.GADGETS || {};
