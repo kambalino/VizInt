@@ -158,9 +158,6 @@ body.dark {
   padding-bottom: 4px;             /* slightly tighter */
 }
 
-/* for the small buttons in prayer times/chronus gadget */
-.mini{ padding:2px 8px; font-size:12px; line-height:1.1; }
-
 /* === Theme variables === */
 :root {
   --bg: #ffffff;

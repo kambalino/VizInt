@@ -9,6 +9,7 @@
 - [x]	Support info buttons for all gadgets
 - [	]	Support generic blank gadget container with configurable/loadable content
 - [ ]	Support pop-up windows for Encapsulated Settings in a ⚙️ button in the main VizInt Bar
+- [	]	can chronus be loaded from the loader.js please instead of index.html?
 
 - [ ]	Support Multiple Instances of Gadgets that each have different contexts
 - [ ]	Support pop-up windows for History (some emoji?)

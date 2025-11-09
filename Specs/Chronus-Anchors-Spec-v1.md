@@ -21,9 +21,9 @@ We want an extensible, calendar-aware system that can:
 * Understand time, not just measure it.
  Recognize daily, weekly, monthly, and annual cycles — religious, civic, astronomical, or personal.
 * Blend immutable and dynamic events.
-Show fixed Anchors (like sunrise or tax deadlines) alongside live user sequences (like Morning Routine).
+Show fixed Anchors (like sunrise or tax deadlines) alongside live user sequences (like Timed Stages in a Recipe).
 * Travel through time and place.
-Ask “What time is Fajr tomorrow in Zamboanga?” or “How much time until next EOM in Cairo?”
+Ask “What time is sunrise tomorrow in Zamboanga?” or “How much time until next EOM in Cairo?”
 * Provide a single hub other gadgets can subscribe to, instead of duplicating time math.
 Chronus does for time what a graphics engine does for visuals — it keeps multiple moving parts coordinated.
 

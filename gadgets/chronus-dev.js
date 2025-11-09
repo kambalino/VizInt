@@ -1,32 +1,5 @@
 (function(){
-  // Minimal inline PrayerTimes provider (owned by this gadget)
-  const Provider = {
-    name: 'PrayerTimesProvider',
-    async provide({ context, frame, cursor }) {
-      if (frame !== 'daily') return [];
-      if (typeof prayTimes === 'undefined') throw new Error('PrayTimes.js not loaded');
-      const date = new Date(cursor);
-      try { prayTimes.setMethod(context.method || 'MWL'); } catch {}
-      prayTimes.adjust({ asr: 'Standard' });
-      const t = prayTimes.getTimes(date, [context.lat, context.lng]);
-      const pairs = [['fajr','Fajr',t.fajr],['sunrise','Sunrise',t.sunrise],['dhuhr','Dhuhr',t.dhuhr],
-                     ['asr','Asr',t.asr],['maghrib','Maghrib',t.maghrib],['isha','Isha',t.isha]];
-      const mk = (lab,hhmm)=>{ const [h,m]=hhmm.split(':').map(n=>+n);
-        return new Date(date.getFullYear(),date.getMonth(),date.getDate(),h,m,0,0); };
-      return pairs.map(([id,label,hhmm])=>({ id:'prayer:'+id,label,at:mk(label,hhmm),frame:'daily',
-        category:'religious', contextId:context.id, source:'PrayerTimesProvider'}));
-    }
-  };
-
-  function fmtHMS(secs){
-    secs = Math.max(0, secs|0);
-    const h = Math.floor(secs/3600), m = Math.floor((secs%3600)/60), s = secs%60;
-    const pad = n => String(n).padStart(2,'0'); return `${pad(h)}:${pad(m)}:${pad(s)}`;
-  }
-
   function mount(host){
-    // Register provider on mount (scoped to this gadget’s lifecycle)
-    window.Chronus.registerProvider(Provider);
 
     host.innerHTML = `
       <div class="field">
