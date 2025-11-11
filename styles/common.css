@@ -20,7 +20,6 @@ h1 { margin:0 0 12px; font-size:18px; }
 .row + .row { border-top:1px solid rgba(0,0,0,0.06); }
 .label { font-weight:600; }
 .status { font-variant-numeric: tabular-nums; }
-/* Emphasize the active/next item */
 .current .label { font-size: 18px; }
 .current .status { font-size: 24px; font-weight: 500; color:#0f766e; line-height: 1.1; }
 
@@ -32,7 +31,6 @@ button, select, input[type="number"], input[type="checkbox"] { padding:6px; }
 
 /* === Gadget Chrome === */
 .gadget-slot { position: relative; }
-
 .g-titlebar {
   display:flex; align-items:center; justify-content:space-between;
   gap:8px; margin:-8px -8px 8px -8px; padding:6px 8px;
@@ -40,15 +38,18 @@ button, select, input[type="number"], input[type="checkbox"] { padding:6px; }
   background: linear-gradient(to bottom, rgba(0,0,0,0.03), rgba(0,0,0,0.00));
   border-top-left-radius:6px; border-top-right-radius:6px;
 }
-.g-title { font-weight:600; font-size:14px; }
+.g-title { font-weight:600; font-size:14px; display:flex; align-items:center; gap:6px; }
 
 .g-title .g-iconbox {
-  box-sizing: border-box; /* ensure borders don’t enlarge the icon box */
+  box-sizing: border-box;
+  display:inline-flex; align-items:center; justify-content:center;
+  width: 1.25em; height: 1.25em; border-radius: 4px;
+  font-size: 1.0em;
 }
 
 .g-actions { display:flex; align-items:center; gap:6px; }
 
-/* --- Universal button style --- */
+/* Universal button style */
 .gbtn {
   border: 1px solid rgba(0,0,0,0.15);
   background: var(--btn-bg, #f9f9f9);
@@ -65,102 +66,37 @@ button, select, input[type="number"], input[type="checkbox"] { padding:6px; }
 
 /* Compact all gadget titlebar buttons */
 .g-titlebar .gbtn {
-  font-size: 11px;     /* smaller icons/text */
+  font-size: 11px;
   line-height: 1.1;
-  padding: 1px 4px;    /* tighter padding */
-  min-width: 18px;     /* narrower button width */
-  border-radius: 3px;  /* slightly rounder corners */
+  padding: 1px 4px;
+  min-width: 18px;
+  border-radius: 3px;
 }
 
 /* Optional: slightly tighten the titlebar itself */
-.g-titlebar {
-  gap: 4px;
-  padding: 4px 6px;
-}
+.g-titlebar { gap: 4px; padding: 4px 6px; }
 
+.gbtn:hover { background: var(--btn-bg-hover, #ececec); }
+.gbtn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.gbtn:hover {
-  background: var(--btn-bg-hover, #ececec);
-}
+/* Themed palette */
+body:not(.dark) { --btn-bg:#f9f9f9; --btn-bg-hover:#ececec; --btn-fg:#222; }
+body.dark      { --btn-bg:#2a2a2a; --btn-bg-hover:#3a3a3a; --btn-fg:#eaeaea; }
 
-/* Disabled state */
-.gbtn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+.gbtn.g-theme { font-size: 1.15em; line-height: 1; background: transparent; border: none; color: var(--btn-fg); }
+.gbtn.g-theme:hover { background: var(--btn-bg-hover); border-radius: 50%; }
 
-/* --- Themed button palette --- */
-body:not(.dark) {
-  --btn-bg: #f9f9f9;
-  --btn-bg-hover: #ececec;
-  --btn-fg: #222;
-}
+/* Body pane */
+.g-body { padding: 8px 10px; overflow-y: auto; max-height: 65vh; transition: opacity 0.25s ease, transform 0.25s ease; }
+.g-body:empty { opacity: 0.6; font-style: italic; color: var(--muted); text-align: center; padding: 12px; content: "Loading…"; }
 
-body.dark {
-  --btn-bg: #2a2a2a;
-  --btn-bg-hover: #3a3a3a;
-  --btn-fg: #eaeaea;
-}
-
-/* Theme toggle icon button */
-.gbtn.g-theme {
-  font-size: 1.15em;
-  line-height: 1;
-  background: transparent;
-  border: none;
-  color: var(--btn-fg);
-}
-.gbtn.g-theme:hover {
-  background: var(--btn-bg-hover);
-  border-radius: 50%;
-}
-
-/* Inner container where gadgets render their content */
-.g-body {
-  padding: 8px 10px;
-  overflow-y: auto;
-  max-height: 65vh; /* prevent runaway scroll for tall gadgets */
-  transition: opacity 0.25s ease, transform 0.25s ease;
-}
-
-/* Subtle animation when a gadget mounts */
-.g-body:empty {
-  opacity: 0.6;
-  font-style: italic;
-  color: var(--muted);
-  text-align: center;
-  padding: 12px;
-  content: "Loading…";
-}
 .g-minimized .g-body { display:none; }
 
-.g-maximized {
-  position: fixed !important; inset:14px; z-index: 9999;
-  width:auto; height:auto; margin:0 !important;
-  box-shadow: 0 15px 45px rgba(0,0,0,0.25);
-}
-/* Span entire grid width (not fullscreen) */
-.g-spanwide {
-  grid-column: 1 / -1;
-}
+.g-maximized { position: fixed !important; inset:14px; z-index: 9999; width:auto; height:auto; margin:0 !important; box-shadow: 0 15px 45px rgba(0,0,0,0.25); }
+.g-spanwide  { grid-column: 1 / -1; }
 
-/* Optional: show only titlebar when collapsed */
-.g-minimized .g-body { display:none; }
-
-/* When a gadget is minimized, hide body (you already have this) */
-.g-minimized .g-body { display: none; }
-
-/* Reduce the outer box’s bottom padding when minimized */
-.gadget-slot.g-minimized {
-  padding-bottom: 6px;            /* was 12px from .cell3d */
-}
-
-/* Remove the extra bottom gap from the titlebar’s margin/padding when minimized */
-.g-minimized .g-titlebar {
-  margin-bottom: 0;                /* was 8px */
-  padding-top: 4px;                /* slightly tighter */
-  padding-bottom: 4px;             /* slightly tighter */
-}
+.gadget-slot.g-minimized { padding-bottom: 6px; }
+.g-minimized .g-titlebar { margin-bottom: 0; padding-top: 4px; padding-bottom: 4px; }
 
 /* === Theme variables === */
 :root {
@@ -169,98 +105,149 @@ body.dark {
   --card-bg: ghostwhite;
   --card-border: silver;
   --accent: #0b5fff;
-  --chronus: rgba(55, 156, 8, 0.76);     /* ✅ transparent green */
+  --chronus: rgba(55, 156, 8, 0.76);
   --muted: #6b7280;
   --ok: #0f766e;
   --warn: #b45309;
   --err: #b91c1c;
 }
-
 body.dark {
-  --bg: #121212;
-  --fg: #e5e5e5;
-  --card-bg: #1c1c1c;
-  --card-border: #2b2b2b;
-  --accent: #4d90ff;
-  --muted: #9ca3af;
-  --ok: #10b981;
-  --warn: #d97706;
-  --err: #ef4444;
+  --bg: #121212; --fg: #e5e5e5;
+  --card-bg: #1c1c1c; --card-border: #2b2b2b;
+  --accent: #4d90ff; --muted: #9ca3af;
+  --ok: #10b981; --warn: #d97706; --err: #ef4444;
 }
-
-/* Apply these automatically */
-body {
-  background: var(--bg);
-  color: var(--fg);
-}
-
+body { background: var(--bg); color: var(--fg); }
 .gbtn.g-theme { font-size: 1.1em; line-height: 1; background: transparent; }
 
+/* Generic row helpers */
+.g-row { display:flex; align-items:baseline; justify-content:space-between; gap:8px; padding:3px 6px; transition: background 0.8s ease, box-shadow 0.8s ease; }
+.g-row.active { background: rgba(11, 95, 255, 0.12); box-shadow: 0 0 6px rgba(11, 95, 255, 0.35); border-radius: 6px; }
+.g-label { flex:1; text-align:left; }
+.g-marker { width:1.2em; text-align:center; color:var(--accent, #0b5fff); opacity:0; transition:opacity 0.8s ease; }
+.g-row.active .g-marker { opacity:1; }
+.g-value { flex:0 0 4.4em; text-align:right; font-variant-numeric: tabular-nums; }
+.g-subvalue { display:flex; justify-content:space-between; margin-left:3.0em; margin-right:0.2em; font-size:0.85em; color:#777; }
 
-/* --- Generic row presentation, supporting highlights for gadgets --- */
-.g-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 3px 6px;
-  transition: background 0.8s ease, box-shadow 0.8s ease;
+/* Chips (tiny, subtle) */
+.g-chips { display:inline-flex; gap:4px; margin-inline-start:6px; }
+.g-chip  { font-size: 11px; opacity: 0.9; }
+
+/* PrayerTimes tweaks */
+#nav { display:none; }
+.nav-btns { display:flex; gap:6px; margin-top:6px; }
+button.mini { padding:2px 8px; font-size:12px; line-height:1.1; }
+#nav strong { font-size:12px; color:var(--muted); }
+
+/* Hub button + popover (if used elsewhere) */
+.gbtn.g-hub { font-size:1rem; line-height:1; padding:2px 6px; }
+.g-pop { position:absolute; right:6px; top:34px; min-width:180px; background:var(--card-bg); color:var(--fg);
+  border:1px solid var(--card-border); border-radius:6px; box-shadow:0 6px 18px rgba(0,0,0,.18); padding:6px; display:none; z-index:10000; }
+.g-pop.on { display:block; }
+.gpop-item { width:100%; text-align:left; border:none; background:transparent; padding:6px 8px; border-radius:4px; cursor:pointer; font:inherit; color:inherit; }
+.gpop-item:hover { background: rgba(0,0,0,.06); }
+body.dark .gpop-item:hover { background: rgba(255,255,255,.07); }
+.gpop-sep { border:none; border-top:1px solid rgba(0,0,0,.08); margin:6px 0; }
+body.dark .gpop-sep { border-top-color: rgba(255,255,255,.08); }
+
+/* Info trigger affordance */
+.g-iconbox.is-interactive { cursor:pointer; filter:saturate(1.1); }
+.g-iconbox.is-interactive:hover { transform: translateY(-0.5px); }
+
+/* === Truncation helper for long labels === */
+.truncate {
+  max-width: 28ch;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
-.g-row.active {
-  background: rgba(11, 95, 255, 0.12);
-  box-shadow: 0 0 6px rgba(11, 95, 255, 0.35);
-  border-radius: 6px;
+/* === Info hover panel (shared) === */
+.g-infopop {
+  position: fixed;
+  min-width: 280px;
+  max-width: 420px;
+  background: var(--card-bg);
+  color: var(--fg);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(0,0,0,.20);
+  padding: 8px 10px;
+  z-index: 10000;
+  display: none;
+  font-size: 12px;
+  line-height: 1.25;
+}
+.g-infopop.on { display: block; }
+.g-infopop-h { font-size: 12.5px; margin-bottom: 6px; }
+.g-infopop-b .row { display:flex; gap:8px; margin:2px 0; }
+.g-infopop-b .k { min-width: 86px; color: var(--muted); }
+.g-infopop-b .v { flex:1; }
+.g-infopop-b .v.v-block { display:block; }
+.g-infopop .capline { display:block; margin:1px 0; }
+.g-infopop .desc { margin-top: 6px; }
+
+/* === Settings: compact list (no header row) === */
+/* Keep this SINGLE definition (removed duplicates) */
+.settings-compact { font-size: 11px; }
+.settings-compact h4 { font-size: 12px; margin-top: 10px; }
+
+.gbtn.gbtn-sm { padding: 4px 8px; font-size: 11px; }
+.gbtn.gbtn-xs { padding: 0 6px; font-size: 10px; line-height: 1; height: 20px; }
+
+.gridlist8 { list-style:none; padding:0; margin:0; }
+.gridlist8 .set-row.grid8 {
+  display: grid;
+  /* Columns: [On | Icon | Name | Cap1 | Cap2 | Cap3 | Up | Down] */
+  grid-template-columns: 24px 22px 1fr 22px 22px 22px 36px 36px;
+  align-items: center;
+  column-gap: 4px;
+  padding: 1px 0;
+  border-bottom: 1px dashed var(--card-border);
 }
 
-.g-label { flex: 1; text-align: left; }
-.g-marker {
-  width: 1.2em;
+/* Tighter spacing between checkbox, icon, and name */
+.gridlist8 .c-chk { padding-right: 2px; }
+.gridlist8 .c-ico { padding-right: 2px; }
+
+/* Name column can shrink => real ellipsis */
+.gridlist8 .c-name { min-width: 0; }
+.gridlist8 .c-name .g-label {
+  display:block;
+  overflow:hidden;
+  white-space:nowrap;
+  text-overflow:ellipsis;
+}
+
+/* Icon/info box (left of name), slightly smaller for density */
+.c-ico .g-iconbox { width: 1.1em; height: 1.1em; border-radius: 4px; display:inline-flex; align-items:center; justify-content:center; }
+.c-ico .g-iconbox.emoji { font-size: 1.0em; }
+.c-ico .g-iconbox img { width: 1.1em; height: 1.1em; display:block; border-radius:4px; }
+
+/* Capability chips (emoji-only) tightly centered */
+/* #code:mods — tighten capability badge spacing */
+.c-cap {
   text-align: center;
-  color: var(--accent, #0b5fff);
-  opacity: 0;
-  transition: opacity 0.8s ease;
+  padding: 0;                /* remove residual padding */
 }
-.g-row.active .g-marker { opacity: 1; }
-
-.g-value {
-  flex: 0 0 4.4em;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
+.c-cap .g-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1em;                /* slightly smaller */
+  height: 1em;
+  margin: 0 1px;             /* minimal horizontal gap */
+  font-size: 0.9em;          /* reduce size just a touch */
+  line-height: 1;
 }
 
-.g-subvalue {
+/* Up/Down buttons: fully centered and aligned */
+.c-up .gbtn, .c-dn .gbtn {
+  width: 100%;
+  height: 20px;
+  padding: 0;
   display: flex;
-  justify-content: space-between;
-  margin-left: 3.0em;
-  margin-right: 0.2em;
-  font-size: 0.85em;
-  color: #777;
-}
-
-/* === PrayerTimes Chronus gadget tweaks === */
-
-/* Navigation container (hidden by default, toggled via [i]) */
-#nav {
-	display: none;
-}
-
-/* Flex layout for its inner buttons */
-.nav-btns {
-	display: flex;
-	gap: 6px;
-	margin-top: 6px;
-}
-
-/* Small “mini” buttons reused globally */
-button.mini {
-	padding: 2px 8px;
-	font-size: 12px;
-	line-height: 1.1;
-}
-
-/* Optional subtle style tweak for the field label */
-#nav strong {
-	font-size: 12px;
-	color: var(--muted);
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
