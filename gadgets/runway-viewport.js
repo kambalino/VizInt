@@ -51,24 +51,31 @@
 	}
 
 	function renderList(listEl, anchors, now){
-		const rows = (anchors||[]).slice().sort((a,b)=>a.at-b.at).map(a=>{
+		// does not appear to use 'now' directly, but kept for future use
+		const rows = (anchors||[])
+			.slice()
+			.sort((a,b)=>a.at-b.at)
+			.map(a=>{
 			const en = a.label || a.id;
 			const ar = a.labelAr ? ` (${a.labelAr})` : '';
 			const tm = `${pad2(a.at.getHours())}:${pad2(a.at.getMinutes())}`;
 			return `
-				<div class="row" data-id="${a.id}">
-					<div class="label">${en}${ar}</div>
-					<div class="time">${tm}</div>
+				<div class="g-row" data-id="${a.id}">
+				<div class="g-marker"></div>
+				<div class="g-label">${en}${ar}</div>
+				<div class="g-value">${tm}</div>
 				</div>
 			`;
-		}).join('');
+			}).join('');
 		listEl.innerHTML = rows;
 	}
 
-	window.GADGETS['runway'] = {
+	window.GADGETS['runway-viewport'] = {
 		info: 'Runway Viewport (blend/run renderer)',
 
 		async mount(host){
+			await window.ChronusReady;
+
 			host.innerHTML = `
 				<div class="gadget">
 					<div class="hdr">
@@ -88,28 +95,34 @@
 
 			function paint(now){
 				renderList(listEl, latest, now);
-				// current + countdown inline
 				const { current, next } = resolveSlots(latest, now);
-				// clear current markers
-				Array.from(listEl.querySelectorAll('.row')).forEach(el=>{
-					el.classList.remove('current');
-					const lab = el.querySelector('.label');
-					if (lab) lab.textContent = lab.textContent.replace(/^▷\s*/, '');
-					const timeEl = el.querySelector('.time');
-					if (timeEl) timeEl.innerHTML = timeEl.textContent; // strip extra lines
+
+				// clear current markers + any prior sublines
+				Array.from(listEl.querySelectorAll('.g-row')).forEach(el=>{
+					el.classList.remove('active');
+					const m = el.querySelector('.g-marker'); if (m) m.textContent = '';
+					const maybeSub = el.nextElementSibling;
+					if (maybeSub && maybeSub.classList.contains('g-subvalue')) maybeSub.remove();
 				});
-				if (current){
-					const el = listEl.querySelector(`.row[data-id="${current.id}"]`);
-					if (el){
-						el.classList.add('current');
-						const lab = el.querySelector('.label');
-						if (lab && !/^▷\s/.test(lab.textContent)) lab.textContent = '▷ ' + lab.textContent;
-						if (next){
-							const etaSecs = Math.max(0, Math.floor((next.at - now)/1000));
-							const tm = el.querySelector('.time');
-							if (tm) tm.innerHTML = `${tm.textContent}<br>⌛ Time Left: ${fmtHMS(etaSecs)}`;
-						}
-					}
+
+				if (!current) return;
+
+				// activate current
+				const row = listEl.querySelector(`.g-row[data-id="${current.id}"]`);
+				if (!row) return;
+
+				row.classList.add('active');
+				const m = row.querySelector('.g-marker'); if (m) m.textContent = '▶';
+
+				// add countdown line as a sibling (keeps time right-aligned & grey)
+				if (next){
+					const etaSecs = Math.max(0, Math.floor((next.at - now)/1000));
+					row.insertAdjacentHTML('afterend', `
+					<div class="g-subvalue">
+						<span>⌛ Time left</span>
+						<span>${fmtHMS(etaSecs)}</span>
+					</div>
+					`);
 				}
 			}
 

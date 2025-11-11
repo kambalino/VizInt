@@ -1,3 +1,18 @@
+/*==============================================================================
+| Chronus PrayerTimes Provider
+| File: providers/chronus_prayerTimes_provider.js
+| Tabs: hard tabs (4 spaces visual)
+|
+| Purpose
+|   - Produce daily prayer anchors (fajr, sunrise, dhuhr, asr, maghrib, isha, fajr_next)
+|     using PrayTimes.js and the active Chronus context (lat/lng/tz/method).
+|
+| Notes
+|   - source: 'providers/chronus_prayerTimes_provider.js'
+|   - category: 'religious'
+|   - frame: 'daily'
+|   - Returns absolute Date objects in `at`.
+==============================================================================*/
 (function(){
 	// —— Single source of truth for prayer labels (EN + AR)
 	const LABELS = {

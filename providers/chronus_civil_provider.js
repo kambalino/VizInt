@@ -4,30 +4,30 @@
 | Tabs: hard tabs (4 spaces visual)
 |
 | 1) Purpose
-|	- Provide “regular” civil time anchors:
-|		day:start, day:midday, day:end
-|		week:start, week:end (ISO week start = Monday)
-|		month:start, month:end
-|		year:start, year:end
+|   - Provide “regular” civil time anchors:
+|     day:start, day:midday, day:end
+|     week:start, week:end (ISO week start = Monday)
+|     month:start, month:end
+|     year:start, year:end
 |
 | 2) Assumptions
-|	- Uses the active context’s timezone implicitly via Date construction.
-|	- Midday is 12:00 local wall-clock (placeholder; solar provider can refine).
-|	- Week starts Monday (ISO). We can make it configurable later.
+|   - Uses the active context’s timezone implicitly via Date construction.
+|   - Midday is 12:00 local wall-clock (placeholder; a Solar provider can refine).
+|   - Week starts Monday (ISO). Configurable later.
 |
 | 3) Output
-|	- Each anchor has: { id, label, labelAr, at:Date, frame, category, contextId, source, priority }
-|	- frame: 'daily' for day:*; 'weekly' for week:*; 'monthly' for month:*; 'annual' for year:*.
-|	- category: 'civil'
-|	- priority: 0 (pillars can use >=0; run steps may use negative)
+|   - Each anchor: { id, label, labelAr, at:Date, frame, category, contextId, source, priority }
+|   - frame: 'daily' (day:*), 'weekly' (week:*), 'monthly' (month:*), 'annual' (year:*).
+|   - category: 'civil'; priority: 0.
 |
 | 4) Diagnostics
-|	- No console noise except hard failures.
+|   - No console noise except hard failures.
 |
 | ★ Future hooks
-|	- Inject true solar noon via Solar provider.
-|	- Configurable week start (Sunday vs Monday).
+|   - True solar noon via Solar provider.
+|   - Configurable week start (Sunday vs Monday).
 ==============================================================================*/
+
 (function(){
 	if (!window.Chronus || typeof window.Chronus.registerProvider !== 'function') return;
 

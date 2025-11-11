@@ -42,6 +42,10 @@ button, select, input[type="number"], input[type="checkbox"] { padding:6px; }
 }
 .g-title { font-weight:600; font-size:14px; }
 
+.g-title .g-iconbox {
+  box-sizing: border-box; /* ensure borders don’t enlarge the icon box */
+}
+
 .g-actions { display:flex; align-items:center; gap:6px; }
 
 /* --- Universal button style --- */
@@ -165,6 +169,7 @@ body.dark {
   --card-bg: ghostwhite;
   --card-border: silver;
   --accent: #0b5fff;
+  --chronus: rgba(55, 156, 8, 0.76);     /* ✅ transparent green */
   --muted: #6b7280;
   --ok: #0f766e;
   --warn: #b45309;
@@ -227,7 +232,7 @@ body {
 .g-subvalue {
   display: flex;
   justify-content: space-between;
-  margin-left: 2em;
+  margin-left: 3.0em;
   margin-right: 0.2em;
   font-size: 0.85em;
   color: #777;
