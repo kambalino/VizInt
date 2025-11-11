@@ -15,7 +15,7 @@
 | 3) UI
 |	- Title + fineprint (city).
 |	- List of anchors for the active frame.
-|	- CURRENT row gets ▷ and inline "⌛ Time Left: H:MM:SS" until NEXT.
+|	- CURRENT row gets ▷ and inline "⌛ Time left: H:MM:SS" until NEXT.
 |
 | 4) Integration
 |	- Subscribes to: chronus.blend.update, chronus.anchor.tick, chronus.cursor.change, chronus.context.change
@@ -32,14 +32,21 @@
 
 	function resolveSlots(anchors, now){
 		const seq = (anchors||[]).slice().sort((a,b)=>a.at-b.at);
-		let current=null, next=null, prev=null;
+		let current=null, next=null, prev=null, phase='between'; // 'pre' | 'between' | 'post'
+
 		for (let i=0;i<seq.length;i++){
 			const a = seq[i];
 			if (a.at <= now) { prev = a; current = a; }
-			if (a.at > now){ next = a; break; }
+			if (a.at >  now) { next = a; break; }
 		}
-		// Special case: if current is the last, next stays null
-		return { seq, prev, current, next };
+		if (!current && seq.length){          // before the first anchor (e.g., pre-Fajr)
+			phase   = 'pre';
+			current = seq[0];                  // show the first as the “current/upcoming”
+			next    = seq[1] || null;          // (optional) second one
+		} else if (current && !next) {         // after the last anchor
+			phase   = 'post';
+		}
+		return { seq, prev, current, next, phase };
 	}
 
 	function fmtHMS(sec){
@@ -50,22 +57,36 @@
 		return `${h}:${pad2(m)}:${pad2(ss)}`;
 	}
 
-	function renderList(listEl, anchors, now){
+	// [ADD] below fmtHMS()
+	function safeJson(s){ try{ return s ? JSON.parse(s) : {}; } catch{ return {}; } }
+
+	// [ADD] time formatter (12/24h based on cfg)
+	function formatTime(d, use24h){
+		const h = d.getHours(), m = pad2(d.getMinutes());
+		if (use24h) return `${pad2(h)}:${m}`;
+		const ampm = h >= 12 ? 'PM' : 'AM';
+		const hh = (h % 12) || 12;
+		return `${hh}:${m} ${ampm}`;
+	}
+
+
+	function renderList(listEl, anchors, now, cfg){
 		// does not appear to use 'now' directly, but kept for future use
 		const rows = (anchors||[])
 			.slice()
 			.sort((a,b)=>a.at-b.at)
+
 			.map(a=>{
-			const en = a.label || a.id;
-			const ar = a.labelAr ? ` (${a.labelAr})` : '';
-			const tm = `${pad2(a.at.getHours())}:${pad2(a.at.getMinutes())}`;
-			return `
-				<div class="g-row" data-id="${a.id}">
-				<div class="g-marker"></div>
-				<div class="g-label">${en}${ar}</div>
-				<div class="g-value">${tm}</div>
-				</div>
-			`;
+				const label = a.label || a.id;
+				const desc  = (a.desc ?? a.labelAr); // compatibility
+				const tm    = formatTime(a.at, cfg.use24h);
+				return `
+					<div class="g-row" data-id="${a.id}">
+						<div class="g-marker"></div>
+						<div class="g-label">${label}${(cfg.showDesc && desc) ? ` (${desc})` : ''}</div>
+						<div class="g-value">${tm}</div>
+					</div>
+				`;
 			}).join('');
 		listEl.innerHTML = rows;
 	}
@@ -75,6 +96,22 @@
 
 		async mount(host){
 			await window.ChronusReady;
+
+			// [ADD] per-instance config (from data-runway on the gadget slot)
+			const slot = host.closest('.gadget-slot');
+			const cfg = {
+				mode: 'blend',                 // 'blend' | 'run'
+				contextId: null,               // bind to Chronus context or fallback to active
+				frame: 'daily',                // 'daily'|'weekly'|'monthly'|'annual'
+				categories: null,              // e.g., ['prayer','civil']
+				use24h: false,                 // time format
+				showDesc: true,                // show description in parentheses
+				fineprintKeys: ['city','method','tz'],
+				// optional for 'run' mode:
+				anchors: null,                 // static array of anchors
+				feedFn: null,                  // async () => ({ anchors, meta })
+				...safeJson(slot?.dataset?.runway)
+			};
 
 			host.innerHTML = `
 				<div class="gadget">
@@ -88,43 +125,121 @@
 			const listEl = host.querySelector('#list');
 			const fineEl = host.querySelector('#fine');
 
+			// after you compute fineEl
+			const titleEl = host.querySelector('.title');
+			if (titleEl) titleEl.textContent = '';  // remove “Runway”
+
+
 			// Mode decision: default 'blend'; allow external to set window.RUNWAY_MODE and window.RUNWAY_FEED
-			const MODE = (window.RUNWAY_MODE === 'run') ? 'run' : 'blend';
+			const MODE = (cfg.mode === 'run') ? 'run' : 'blend';
+
 
 			let latest = [];	// anchors currently displayed
 
-			function paint(now){
-				renderList(listEl, latest, now);
-				const { current, next } = resolveSlots(latest, now);
+			// [ADD] day-window state (UTC instants) + next-day first anchor
+			let dayStart = null;   // Date (UTC) start of the current day for context TZ
+			let dayEnd   = null;   // Date (UTC) end   of the current day for context TZ
+			let nextDayFirst = null; // Anchor | null
 
-				// clear current markers + any prior sublines
-				Array.from(listEl.querySelectorAll('.g-row')).forEach(el=>{
-					el.classList.remove('active');
-					const m = el.querySelector('.g-marker'); if (m) m.textContent = '';
-					const maybeSub = el.nextElementSibling;
-					if (maybeSub && maybeSub.classList.contains('g-subvalue')) maybeSub.remove();
-				});
+			function computeDayWindow(now, ctx){
+				// minutes east of UTC for the *context* timezone
+				const tzOffsetMin = (ctx && typeof ctx.tzOffsetMin === 'number')
+					? ctx.tzOffsetMin
+					: (-now.getTimezoneOffset()); // fallback: machine offset
 
-				if (!current) return;
+				const DAY = 24 * 60 * 60 * 1000;
+				const nowUTC   = now.getTime();
+				const localMs  = nowUTC + tzOffsetMin * 60000;           // shift to context-local wall time
+				const startLoc = Math.floor(localMs / DAY) * DAY;        // floor to local midnight *in ms*
+				const startUTC = startLoc - tzOffsetMin * 60000;         // shift back to UTC
+				const endUTC   = startUTC + DAY;
 
-				// activate current
-				const row = listEl.querySelector(`.g-row[data-id="${current.id}"]`);
-				if (!row) return;
+				return { startUTC: new Date(startUTC), endUTC: new Date(endUTC), tzOffsetMin };
+			}
 
-				row.classList.add('active');
-				const m = row.querySelector('.g-marker'); if (m) m.textContent = '▶';
 
-				// add countdown line as a sibling (keeps time right-aligned & grey)
-				if (next){
-					const etaSecs = Math.max(0, Math.floor((next.at - now)/1000));
-					row.insertAdjacentHTML('afterend', `
+			let lastPaintedKey = '';
+			function structuralKey(list){
+				return (list || []).map(a => `${a.id}@${a.at?.getTime?.()||0}`).join('|');
+			}
+
+function applyCurrentAndCountdown(now){
+	const { seq, current, next, phase } = resolveSlots(latest, now);
+
+	// clear markers + any existing subline (do NOT rebuild rows)
+	Array.from(listEl.querySelectorAll('.g-row')).forEach(el=>{
+		el.classList.remove('active');
+		const m = el.querySelector('.g-marker'); if (m) m.textContent = '';
+		const sub = el.nextElementSibling;
+		if (sub && sub.classList.contains('g-subvalue')) sub.remove();
+	});
+
+	if (!seq.length) return;
+
+	const rowOf   = a => a && listEl.querySelector(`.g-row[data-id="${a.id}"]`);
+	const first   = seq[0];
+	const last    = seq[seq.length - 1];
+	const firstEl = rowOf(first);
+	const lastEl  = rowOf(last);
+
+
+	if (phase === 'pre') {
+		// PRE-FIRST (after midnight, before Fajr):
+		// - Symbolic highlight on today's Isha (last visible row) with ▷
+		// - Countdown should appear *after that symbolic row*, but target Fajr (first.at)
+		if (lastEl){
+			lastEl.classList.add('active');
+			const m = lastEl.querySelector('.g-marker'); if (m) m.textContent = '▷';
+			if (first?.at){
+				const eta = Math.max(0, Math.floor((first.at - now)/1000));
+				lastEl.insertAdjacentHTML('afterend', `
 					<div class="g-subvalue">
 						<span>⌛ Time left</span>
-						<span>${fmtHMS(etaSecs)}</span>
+						<span>${fmtHMS(eta)}</span>
 					</div>
-					`);
-				}
+				`);
 			}
+		}
+		return;
+	}
+
+	if (next) {
+		// BETWEEN anchors:
+		// - Highlight true current with ▶
+		// - Countdown to NEXT
+		const curEl = rowOf(current);
+		if (curEl){
+			curEl.classList.add('active');
+			const m = curEl.querySelector('.g-marker'); if (m) m.textContent = '▶';
+			const eta = Math.max(0, Math.floor((next.at - now)/1000));
+			curEl.insertAdjacentHTML('afterend', `
+				<div class="g-subvalue">
+					<span>⌛ Time left</span>
+					<span>${fmtHMS(eta)}</span>
+				</div>
+			`);
+		}
+		return;
+	}
+
+	// POST-LAST:
+	// - Highlight Isha with ▷
+	// - Countdown to tomorrow's first if available
+	if (lastEl){
+		lastEl.classList.add('active');
+		const m = lastEl.querySelector('.g-marker'); if (m) m.textContent = '▷';
+		if (nextDayFirst?.at){
+			const eta = Math.max(0, Math.floor((nextDayFirst.at - now)/1000));
+			lastEl.insertAdjacentHTML('afterend', `
+				<div class="g-subvalue">
+					<span>⌛ Time left</span>
+					<span>${fmtHMS(eta)}</span>
+				</div>
+			`);
+		}
+	}
+}
+
 
 			function updateFineprint(){
 				try{
@@ -138,36 +253,98 @@
 			// Feed resolution
 			function refreshFromBlend(){
 				try{
-					const st = window.Chronus.getState ? window.Chronus.getState() : {};
-					const ctxId = st.activeContextId;
-					const frame = st.frame || 'daily';
-					latest = (window.Chronus.getAnchors({ contextId: ctxId, frame }) || []).slice().sort((a,b)=>a.at-b.at);
-				}catch(_){ latest = []; }
+					const st  = window.Chronus.getState ? window.Chronus.getState() : {};
+					const ctx = (window.Chronus.listContexts?.() || []).find(c => c.id === (cfg.contextId || st.activeContextId)) || {};
+					const now = st.cursor ? new Date(st.cursor) : new Date();
+
+					// Compute today's window in context TZ
+					const win = computeDayWindow(now, ctx);
+					dayStart = win.startUTC;
+					dayEnd   = win.endUTC;
+
+					// Get a superset of anchors (not just frame-filtered), then select today's and peek tomorrow's first
+					let all = window.Chronus.getAnchors ? (window.Chronus.getAnchors({ contextId: ctx.id }) || []) : [];
+					// today's visible list
+					let todays = all.filter(a => a.at >= dayStart && a.at < dayEnd);
+					// tomorrow's first (for countdown only)
+					const tomorrowCandidates = all
+						.filter(a => a.at >= dayEnd && a.at < new Date(dayEnd.getTime() + 24*3600*1000));
+					tomorrowCandidates.sort((x,y)=>x.at - y.at);
+					nextDayFirst = tomorrowCandidates[0] || null;
+
+					latest = todays.slice().sort((x,y)=>x.at - y.at);
+				}catch(_){ latest = []; nextDayFirst = null; }
 			}
+
 			async function refreshFromRun(){
 				try{
-					if (typeof window.RUNWAY_FEED === 'function'){
-						latest = await window.RUNWAY_FEED();
-					}else if (Array.isArray(window.RUNWAY_FEED)){
-						latest = window.RUNWAY_FEED.slice();
+					if (typeof cfg.feedFn === 'function'){
+						const out = await cfg.feedFn();
+						latest = (out?.anchors || []).slice().sort((a,b)=>a.at - b.at);
+						latest.meta = out?.meta || null;
+					}else if (Array.isArray(cfg.anchors)){
+						latest = cfg.anchors.slice().sort((a,b)=>a.at - b.at);
 					}else{
 						latest = [];
 					}
-					latest.sort((a,b)=>a.at-b.at);
 				}catch(_){ latest = []; }
 			}
 
+			function getMeta() {
+				// Blend mode: derive from Chronus context
+				if (cfg.mode === 'blend' && Chronus.getState) {
+					const st  = Chronus.getState();
+					const ctx = Chronus.listContexts().find(c => c.id === (cfg.contextId || st.activeContextId));
+					return ctx || {};
+				}
+				// Run mode: allow the sequence/anchors supplier to attach meta
+				if (latest?.meta) return latest.meta;   // e.g., { city:'Seattle', tz:'PST' }
+					return {};
+			}
+
+			function renderFineprint(el){
+				const meta = getMeta();
+				const parts = (cfg.fineprintKeys||[])
+					.map(k => meta?.[k])
+					.filter(Boolean);
+				el.textContent = parts.length ? parts.join(' · ') : '';
+			}
+
 			function recalcAndPaint(){
-				const now = new Date();
-				if (MODE === 'blend') refreshFromBlend();
-				else refreshFromRun();
-				updateFineprint();
-				paint(now);
+				const st = Chronus.getState ? Chronus.getState() : {};
+				const now = st.cursor ? new Date(st.cursor) : new Date();
+
+				// refresh data
+				if (MODE === 'blend') refreshFromBlend(); else refreshFromRun();
+
+				// fineprint
+				renderFineprint(fineEl);
+
+				// rebuild rows ONLY when ids/times changed
+				const key = structuralKey(latest);
+				if (key !== lastPaintedKey){
+					renderList(listEl, latest, now, cfg);
+					lastPaintedKey = key;
+				}
+
+				// always (re)apply marker + countdown
+				applyCurrentAndCountdown(now);
 			}
 
 			// Subscriptions
 			const offBlend  = window.Chronus.on('chronus.blend.update',	()=>recalcAndPaint());
-			const offTick   = window.Chronus.on('chronus.anchor.tick',	()=>recalcAndPaint());
+			// Per-second fast path: always use live wall-clock time for countdown updates.
+			// (Cursor/time-travel is handled by the structural paths: cursor/context/blend events.)
+			const offTick = window.Chronus.on('chronus.anchor.tick', ()=>{
+				const now = new Date();
+				applyCurrentAndCountdown(now);
+
+				// [ADD] Midnight rollover: when we cross the [dayEnd) boundary, refresh structure once
+				if (dayEnd && now >= dayEnd){
+					recalcAndPaint();   // recompute window, refill today's anchors, repaint once
+				}
+			});
+
 			const offCursor = window.Chronus.on('chronus.cursor.change',	()=>recalcAndPaint());
 			const offCtx    = window.Chronus.on('chronus.context.change',	()=>recalcAndPaint());
 

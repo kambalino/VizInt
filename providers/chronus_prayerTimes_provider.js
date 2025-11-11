@@ -98,6 +98,9 @@
 			if (!method || method.toLowerCase() === 'auto'){
 				method = pickMethod(context && context.country, context && context.lat, context && context.lng);
 			}
+			// [ADD] make the method visible to the renderer via context meta
+			try { if (context && !context.method) context.method = method; } catch {}
+
 			try { prayTimes.setMethod(method); } catch {}
 			const asrMode = (context && typeof context.asr === 'string') ? context.asr : 'Standard';
 			try { prayTimes.adjust({ asr: asrMode }); } catch {}
