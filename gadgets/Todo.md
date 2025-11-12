@@ -1,13 +1,13 @@
 # TODO
 
-## VizInt:
+## VizInt Portal:
 
 - [x]	Support Dark Mode
 	- [x]	Including for buttons
 - [x]	Permanently print $VER: 
 - [x]	Support adding gadgets that reference external gadgets
 - [x]	Support info buttons for all gadgets
-- [	]	Support generic blank gadget container with configurable/loadable content
+- [x]	Support generic blank gadget container with configurable/loadable content
 - [ ]	Support pop-up windows for Encapsulated Settings in a ⚙️ button in the main VizInt Bar
 - [	]	can chronus be loaded from the loader.js please instead of index.html?
 
@@ -18,6 +18,12 @@
 - [ ]	Support title-bar based mouse movement
 - [ ]	Refactor vizint in to its own gadget?
 
+### Embed Gadget:
+-[ ]	Include Mahdy's calendar
+-[ ]	https://calendar.mmkaram.dev/
+-[ ]	
+-[ ]	
+
 ### VizInt IPC:
 - [ ]	Support Banner Message queue
 	- [ ]	Top most rotates in Banner
@@ -25,7 +31,8 @@
 - [ ] 	Support messaging between gadgets and portal
 	- [ ]	Notifications can cause Favicon changes/flashes
 
-## TimeRoad Gadget
+## TimeRoad Gadget:
+- [ ]	
 - [ ]	Personal feed via rss or csv
 
 - [ ]	Support Extensible Event libraries
@@ -37,6 +44,9 @@
 	- [ ]	Jewish: Rosh Hashana + Yom Kippur etc.
 	- [ ]	Christian: Passover, Easter, Christmas, etc.
 
+## Flashcards Gadget
+- [ ]	Import CSV Format
+- [ ]	Cycle through items at Random
 
 ## Prayer Times:
 - [x]	Encapsulate city determination logic in [️ℹ️] button

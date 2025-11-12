@@ -196,12 +196,13 @@ body.dark .gpop-sep { border-top-color: rgba(255,255,255,.08); }
 .gbtn.gbtn-xs { padding: 0 6px; font-size: 10px; line-height: 1; height: 20px; }
 
 .gridlist8 { list-style:none; padding:0; margin:0; }
+/* tighten inter-column spacing between Cap1 | Cap2 | Cap3 */
 .gridlist8 .set-row.grid8 {
   display: grid;
   /* Columns: [On | Icon | Name | Cap1 | Cap2 | Cap3 | Up | Down] */
-  grid-template-columns: 24px 22px 1fr 22px 22px 22px 36px 36px;
+  grid-template-columns: 24px 22px 1fr 20px 20px 20px 20px 20px;
   align-items: center;
-  column-gap: 4px;
+  column-gap: 1px;
   padding: 1px 0;
   border-bottom: 1px dashed var(--card-border);
 }
@@ -226,19 +227,22 @@ body.dark .gpop-sep { border-top-color: rgba(255,255,255,.08); }
 
 /* Capability chips (emoji-only) tightly centered */
 /* #code:mods — tighten capability badge spacing */
+/* #code:mods — close badge gaps between capability columns */
 .c-cap {
   text-align: center;
-  padding: 0;                /* remove residual padding */
+  padding: 0;
+  margin: 0;
+  line-height: 1;
 }
+
 .c-cap .g-chip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1em;                /* slightly smaller */
-  height: 1em;
-  margin: 0 1px;             /* minimal horizontal gap */
-  font-size: 0.9em;          /* reduce size just a touch */
-  line-height: 1;
+  width: 0.95em;        /* slightly smaller */
+  height: 0.95em;
+  font-size: 0.9em;
+  margin: 0;            /* remove extra inline gap */
 }
 
 /* Up/Down buttons: fully centered and aligned */

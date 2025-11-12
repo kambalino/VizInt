@@ -15,7 +15,18 @@
 	<script src="./lib/history.js"></script>
 	<script src="./lib/registry.js"></script>  <!-- ✅ Added -->
 	<script src="./lib/chronus.js"></script>
-	<!-- script src="./providers/prayerTimesProvider.js"></script -->
+
+<!-- script>
+try {
+  localStorage.removeItem('portalSettings');
+  localStorage.removeItem('vizint.registry');
+  console.log('[VizInt SafeStart] Cleared portalSettings + vizint.registry');
+} catch(e) {
+  console.warn('[VizInt SafeStart] Cleanup failed', e);
+}
+</script -->
+
+
 
 	<script src="./lib/loader.js"></script>
 
