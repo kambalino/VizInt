@@ -149,6 +149,10 @@
 
 		// Debounced, non-destructive writer: re-read latest, merge only our subtree
 		let __saveT = null;
+		function cancelPendingSave(){
+			if (__saveT){ clearTimeout(__saveT); __saveT = null; }
+		}
+
 		function save(next){
 			const mergedFlash = { ...(ctx.getSettings().flashcards || {}), ...next };
 			clearTimeout(__saveT);
@@ -451,21 +455,48 @@
 				restartTimer(); render();
 			}else if (act === "flip"){
 				if (my.flipStyle === "reveal"){ showingAnswer = !showingAnswer; render(); }
-			}else if (act === "reset"){
-				showingAnswer=false; my.index=0; my.history=[0]; my.pool=[]; reseedIfNeeded(true); render();
-			}else if (act === "config"){
+			} else if (act === "reset") {
+				showingAnswer = false;
+				my.auto = false;                       // force manual mode
+				const next = save({ ...my, auto:false });
+				Object.assign(my, next);
+
+				my.index = 0;
+				my.history = my.parsed.length ? [0] : [];
+				my.pool = [];
+				reseedIfNeeded(true);
+				render();                               // ⏸️ shows, timer won’t restart
+				// no restartTimer(); (auto is off now)
+			} else if (act === "config"){
 				toggleConfig(true);
-			}else if (act === "purge"){
+			} else if (act === "purge") {
 				stopTimer();
-				const latestAll = ctx.getSettings(); const nextAll = { ...latestAll }; delete nextAll.flashcards;
+				cancelPendingSave(); // <-- prevent a stale deferred write from restoring data
+
+				// Drop our subtree only; do not touch other gadget state
+				const latestAll = ctx.getSettings();
+				const nextAll = { ...latestAll };
+				delete nextAll.flashcards;            // erase context entirely
 				ctx.setSettings(nextAll);
+
+				// Clear runtime + form fields
 				Object.assign(my, {
 					rawCSV:"", sourceUrl:"", parsed:[],
 					mode:"drand", auto:false, intervalMs:5000, flipStyle:"reveal",
 					index:0, pool:[], history:[], ui:{ showConfig:false }
 				});
-				showingAnswer=false; render();
+				urlIn.value = "";
+				csvIn.value = "";
+				modeIn.value = "drand";
+				autoIn.value = "off";
+				intIn.value = 5;
+				flipIn.value = "reveal";
+
+				showingAnswer = false;
+				render(); // reflects ⏸️ and empty deck
+				// no restartTimer(); (auto is off)
 			}
+
 		});
 
 		host.querySelector('[data-cfg="close"]').addEventListener("click", ()=> toggleConfig(false));
