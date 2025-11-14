@@ -7,7 +7,7 @@
     _class: "EmbedWeb",
     _type: "singleton",
     _id: "EmbedWeb",
-    _ver: "v0.3.0",
+    _ver: "v0.3.2",
     label: "Embed Web",
     iconEmoji: "🌐",
     capabilities: ["network"], // URL fetch (paste works offline)
@@ -22,6 +22,7 @@
     info: manifest.description,
     mount,
     unmount,
+	onInfoClick       // <-- new: lets the title-bar icon toggle the toolbar
   };
 
   function mount(root, ctx) {
@@ -155,23 +156,48 @@
     );
 
     root.append(handle, pop, body, hint);
-
-    // --- Expand-on-hover that pushes content; 2s dwell after mouse leaves ---
+// --- Expand/collapse helpers (hover + click + icon-bridge) ---
     let collapseTimer = null;
+    const isExpanded = () => handle.classList.contains("expanded");
     const expand = () => {
       clearTimeout(collapseTimer);
       handle.classList.add("expanded");
     };
-    const scheduleCollapse = () => {
+    const collapseSoon = (ms = 2000) => {
       clearTimeout(collapseTimer);
-      collapseTimer = setTimeout(() => handle.classList.remove("expanded"), 2000); // ~2s
+      collapseTimer = setTimeout(() => handle.classList.remove("expanded"), ms);
     };
 
-    handle.addEventListener("mouseenter", expand);
-    handle.addEventListener("mouseleave", scheduleCollapse);
-    tools.addEventListener("mouseenter", expand);
-    tools.addEventListener("mouseleave", scheduleCollapse);
+    const collapseNow = () => {
+      clearTimeout(collapseTimer);
+      handle.classList.remove("expanded");
+    };
+    const toggleBar = (persistOpen = false) => {
+      if (isExpanded()) {
+        // explicit toggle close
+        collapseNow();
+      } else {
+        expand();
+        if (!persistOpen) collapseSoon(2000);
+      }
+    };
 
+	// Expose a tiny control API so onInfoClick can reach us later
+	root.__api = { toggleBar };
+
+    // Hover behavior (unchanged dwell)
+    handle.addEventListener("mouseenter", expand);
+    handle.addEventListener("mouseleave", () => collapseSoon(2000));
+    tools.addEventListener("mouseenter", expand);
+    tools.addEventListener("mouseleave", () => collapseSoon(2000));
+
+    // NEW: Click the thin handle to toggle
+    handle.addEventListener("click", (e) => {
+      // avoid stealing clicks from buttons inside the tools
+      if (e.target.closest(".vi-ew-tools")) return;
+      toggleBar(true); // explicit user click: stay open until clicked again
+    });
+	
     // --- Popover actions ---
     tEdit.addEventListener("click", () => {
       input.value = S.get().url || "";
@@ -215,8 +241,25 @@
       }
     });
 
+    // --- Bridge portal icon → toggle toolbar (support several possible APIs) ---
+    try {
+      if (ctx && typeof ctx.onIconClick === "function") {
+        ctx.onIconClick(() => toggleBar(true));
+      } else if (ctx && typeof ctx.on === "function") {
+        // event-bus style
+        ctx.on("icon", () => toggleBar(true));
+      }
+    } catch {}
+    // Fallback for loaders that call gadget method directly
+    try {
+      window.GADGETS = window.GADGETS || {};
+      if (window.GADGETS.EmbedWeb) {
+        window.GADGETS.EmbedWeb.onIconClick = () => toggleBar(true);
+      }
+    } catch {}
+
     // Initial render
-    render(S.get().url || "");
+	render(S.get().url || "");
 
     // helpers
     function render(url) {
@@ -249,5 +292,21 @@
     root.__vi_unmount = () => { root.innerHTML = ""; delete root.__vi_unmount; };
   }
 
-  function unmount(root) { if (root && root.__vi_unmount) root.__vi_unmount(); }
+	//
+
+	function onInfoClick(ctx, { body }) {
+		try {
+			// Use the control API we attached during mount
+			body?.__api?.toggleBar?.(true);
+		} catch (e) {
+			// If anything goes wrong, do nothing; loader will show the default info.
+		}
+}
+
+
+
+	function unmount(root) {
+		try { clearTimeout(collapseTimer); } catch {}
+		if (root && root.__vi_unmount) root.__vi_unmount(); 
+	}
 })();
