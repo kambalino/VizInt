@@ -289,7 +289,13 @@
       return b;
     }
 
-    root.__vi_unmount = () => { root.innerHTML = ""; delete root.__vi_unmount; };
+	root.__vi_unmount = () => {
+		try { clearTimeout(collapseTimer); } catch {}
+		try { if (root.__api) delete root.__api; } catch {}
+		root.innerHTML = '';
+		delete root.__vi_unmount;
+	};
+
   }
 
 	//
@@ -301,12 +307,9 @@
 		} catch (e) {
 			// If anything goes wrong, do nothing; loader will show the default info.
 		}
-}
-
-
+	}
 
 	function unmount(root) {
-		try { clearTimeout(collapseTimer); } catch {}
-		if (root && root.__vi_unmount) root.__vi_unmount(); 
+		if (root && root.__vi_unmount) root.__vi_unmount();
 	}
 })();
