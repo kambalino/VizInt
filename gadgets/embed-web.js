@@ -48,20 +48,21 @@
 
     const css = document.createElement("style");
     css.textContent = `
-      .vi-embedweb { position: relative; display: flex; flex-direction: column; }
+		.vi-embedweb { position: relative; display: flex; flex-direction: column; }
 
       /* BLANK mode hides iframe panel entirely, only shows instructions */
       .vi-embedweb.blank .vi-ew-body { display: none; }
       .vi-embedweb.blank .vi-ew-hint { display: block; }
 
       /* Handle bar (expands downward to reveal toolbar; pushes content) */
-      .vi-ew-handle {
-        height: 3px;
-        background: rgba(0,0,0,.1);
-        position: relative;
-        overflow: hidden;
-        transition: height .15s ease;
-      }
+		.vi-ew-handle {
+			height: 3px;
+			background: rgba(0,0,0,.1);
+			position: relative;
+			overflow: hidden;
+			transition: height .15s ease;
+			z-index: 3;
+		}
       .vi-ew-handle.expanded {
         height: 28px; /* room for the toolbar */
         background: rgba(255,255,255,.96);
@@ -99,8 +100,9 @@
       }
 
       /* Iframe panel (fixed height, per spec) */
-      .vi-ew-body { position: relative; }
-      .vi-ew-iframe { width: 100%; height: 480px; border: 0; display: block; background: #fff; }
+		.vi-ew-body   { position: relative; z-index: 1; }
+      	.vi-ew-iframe { width: 100%; height: 480px; border: 0; display: block; background: #fff; position: relative; z-index: 1; }/* stays under the handle/tools */
+
 
       /* Compact inline error */
       .vi-ew-error {
