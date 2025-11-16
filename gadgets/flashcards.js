@@ -273,9 +273,17 @@
 
 		// ---- Runtime ----
 		let timer = null;
+		let cdTimer = null;
+		let nextDueTs = 0;
 		let showingAnswer = false;
 		let ro = null;
 		let painting = false;
+
+		// diminishing-random cycle state (runtime-only; NOT persisted)
+		my.cycleOrder = my.cycleOrder || null;
+		my.cyclePos = my.cyclePos || 0;
+		my.prevCycleOrder = my.prevCycleOrder || null;
+		my.futureCycleOrder = my.futureCycleOrder || null;
 
 		function syncCfgInputs(){
 			urlIn.value = my.sourceUrl || "";
@@ -300,7 +308,10 @@
 				const next = save({ ...my, mode: modeIn.value });
 				Object.assign(my, next);
 				reseedIfNeeded(true);
+				ensureInitialIndex();
+				showingAnswer = false;
 				render();
+				if (my.auto) restartTimer();
 			});
 			autoIn.addEventListener("change", () => {
 				const on = (autoIn.value === "on");
@@ -336,12 +347,45 @@
 			if (show) stopTimer(); else restartTimer();
 		}
 
+		function buildCycle(){
+			const n = my.parsed.length;
+			return shuffle([...Array(n).keys()]);
+		}
+
+		// Ensure we have a current cycle and starting index
+		function ensureInitialIndex(){
+			if (!my.parsed.length || (my.history && my.history.length)) return;
+			if (my.mode === "drand"){
+				if (!Array.isArray(my.cycleOrder) || !my.cycleOrder.length){
+					my.cycleOrder = buildCycle();
+					my.cyclePos = 0;
+				}
+				my.index = my.cycleOrder[my.cyclePos];
+				my.history = [my.index];
+			}else{
+				my.index = clamp(my.index || 0, 0, my.parsed.length - 1);
+				my.history = my.parsed.length ? [my.index] : [];
+			}
+		}
+
 		function reseedIfNeeded(force=false){
 			const n = my.parsed.length;
-			if (!n){ my.pool=[]; my.history=[]; my.index=0; return; }
+			if (!n){
+				my.pool = [];
+				my.history = [];
+				my.index = 0;
+				my.cycleOrder = null;
+				my.prevCycleOrder = null;
+				my.futureCycleOrder = null;
+				my.cyclePos = 0;
+				return;
+			}
 			if (my.mode === "drand"){
-				if (force || !Array.isArray(my.pool) || my.pool.length === 0){
-					my.pool = shuffle([...Array(n).keys()]);
+				if (force || !Array.isArray(my.cycleOrder) || !my.cycleOrder.length){
+					my.prevCycleOrder = null;
+					my.futureCycleOrder = null;
+					my.cycleOrder = buildCycle();
+					my.cyclePos = 0;
 				}
 			}
 		}
@@ -349,22 +393,77 @@
 		function takeNextIndex(){
 			const n = my.parsed.length;
 			if (!n) return 0;
+
 			if (my.mode === "sequential"){
 				const idx = (my.index + 1) % n;
-				my.history.push(idx); my.index = idx;
+				my.history.push(idx);
+				my.index = idx;
 				return idx;
 			}
-			if (!my.pool.length) reseedIfNeeded(true);
-			const idx = my.pool.pop();
+
+			// drand
+			if (!Array.isArray(my.cycleOrder) || !my.cycleOrder.length){
+				my.cycleOrder = buildCycle();
+				my.cyclePos = 0;
+			}
+
+			// move forward within current cycle, or shift to future/new cycle
+			if (my.cyclePos < my.cycleOrder.length - 1){
+				my.cyclePos++;
+			}else{
+				if (Array.isArray(my.futureCycleOrder) && my.futureCycleOrder.length){
+					my.prevCycleOrder = my.cycleOrder.slice();
+					my.cycleOrder = my.futureCycleOrder.slice();
+					my.futureCycleOrder = null;
+					my.cyclePos = 0;
+				}else{
+					my.prevCycleOrder = my.cycleOrder.slice();
+					my.cycleOrder = buildCycle();
+					my.cyclePos = 0;
+				}
+			}
+			const idx = my.cycleOrder[my.cyclePos];
 			my.history.push(idx);
+			my.index = idx;
 			return idx;
 		}
+
 		function takePrevIndex(){
-			if (!my.history.length) return my.index || 0;
-			my.history.pop();
-			const prev = my.history.length ? my.history[my.history.length-1] : (my.index||0);
-			my.index = prev;
-			return prev;
+			// If we're on Side B (reveal), Prev should just show Side A
+			if (my.flipStyle === "reveal" && showingAnswer){
+				showingAnswer = false;
+				return my.index || 0;
+			}
+
+			const n = my.parsed.length;
+			if (!n) return 0;
+
+			if (my.mode === "sequential"){
+				const idx = Math.max(0, (my.index || 0) - 1);
+				my.index = idx;
+				return idx;
+			}
+
+			// drand
+			if (!Array.isArray(my.cycleOrder) || !my.cycleOrder.length){
+				my.cycleOrder = buildCycle();
+				my.cyclePos = 0;
+			}
+
+			if (my.cyclePos > 0){
+				my.cyclePos--;
+			}else if (Array.isArray(my.prevCycleOrder) && my.prevCycleOrder.length){
+				my.futureCycleOrder = my.cycleOrder.slice();
+				my.cycleOrder = my.prevCycleOrder.slice();
+				my.prevCycleOrder = null;
+				my.cyclePos = my.cycleOrder.length - 1;
+			}else{
+				// already at earliest we allow
+			}
+
+			const idx = my.cycleOrder[my.cyclePos];
+			my.index = idx;
+			return idx;
 		}
 
 		function renderCard(idx){
@@ -408,31 +507,72 @@
 			});
 		}
 
+		function updateStatus(){
+			const n = my.parsed.length;
+			const idx = clamp(my.index || 0, 0, Math.max(0, n - 1));
+			const total = n;
+			const actual = total ? (idx + 1) : 0;
+
+			let drandPos = actual;
+			if (my.mode === "drand" && Array.isArray(my.cycleOrder) && my.cycleOrder.length){
+				// position inside current drand cycle is 1-based
+				drandPos = (my.cyclePos + 1);
+			}
+
+			const modeTxt = (my.mode === "drand") ? "drand" : "seq";
+			const totSec = (my.intervalMs || 5000) / 1000;
+			let autoTxt = "manual";
+			if (my.auto){
+				const rem = Math.max(0, Math.ceil((nextDueTs - Date.now()) / 1000));
+				autoTxt = `auto ${rem}/${totSec|0}s`;
+			}
+			elStatus.textContent = `[ #${actual}~${drandPos}/${total} ] · ${modeTxt} · ${autoTxt}`;
+		}
+
 		function render(){
 			if (painting) return; painting = true;
 			const n = my.parsed.length;
 			const idx = clamp(my.index || 0, 0, Math.max(0, n - 1));
-			const modeTxt = (my.mode === "drand") ? "drand" : "seq";
-			const autoTxt = my.auto ? `auto ${(my.intervalMs/1000)|0}s` : "manual";
-			elStatus.textContent = `${n ? idx+1 : 0}/${n} · ${modeTxt} · ${autoTxt}`;
+			updateStatus();
 			renderCard(idx);
 			const autoBtn = elControls.querySelector('[data-act="auto"]');
 			autoBtn.textContent = my.auto ? "⏸️" : "▶️";
 			painting = false;
 		}
 
-		function stopTimer(){ if (timer){ clearInterval(timer); timer=null; } }
+		function stopTimer(){
+			if (timer){ clearInterval(timer); timer = null; }
+			if (cdTimer){ clearInterval(cdTimer); cdTimer = null; }
+			nextDueTs = 0;
+			updateStatus();
+		}
 		function restartTimer(){
 			stopTimer();
 			if (!my.auto || !my.parsed.length || (my.ui && my.ui.showConfig)) return;
+			const ivl = my.intervalMs || 5000;
+			nextDueTs = Date.now() + ivl;
+
+			// UI countdown ticker
+			cdTimer = setInterval(updateStatus, 250);
+
 			timer = setInterval(()=>{
 				if (my.flipStyle === "reveal"){
-					if (!showingAnswer){ showingAnswer=true; render(); }
-					else { showingAnswer=false; my.index=takeNextIndex(); render(); }
+					if (!showingAnswer){
+						showingAnswer = true;
+						render();
+					}else{
+						showingAnswer = false;
+						my.index = takeNextIndex();
+						render();
+					}
 				}else{
-					my.index=takeNextIndex(); render();
+					my.index = takeNextIndex();
+					render();
 				}
-			}, my.intervalMs || 5000);
+				// schedule next countdown window
+				nextDueTs = Date.now() + ivl;
+				updateStatus();
+			}, ivl);
 		}
 
 		elControls.addEventListener("click", (e)=>{
@@ -440,22 +580,35 @@
 			const act = b.dataset.act;
 
 			if (act === "prev"){
-				showingAnswer = (my.flipStyle === "reveal") ? true : false;
-				my.index = takePrevIndex(); render();
+				my.index = takePrevIndex();
+				render();
+				if (my.auto) restartTimer();
 			}else if (act === "next"){
 				showingAnswer = false;
-				my.index = takeNextIndex(); render();
+				my.index = takeNextIndex();
+				render();
+				if (my.auto) restartTimer();
 			}else if (act === "mode"){
 				my.mode = (my.mode === "drand") ? "sequential" : "drand";
 				save({ ...my, mode: my.mode });
-				showingAnswer=false; reseedIfNeeded(true); render();
+				reseedIfNeeded(true);
+				ensureInitialIndex();
+				showingAnswer = false;
+				render();
+				if (my.auto) restartTimer();
 			}else if (act === "auto"){
 				my.auto = !my.auto;
 				save({ ...my, auto: my.auto });
-				restartTimer(); render();
+				restartTimer();
+				render();
 			}else if (act === "flip"){
-				if (my.flipStyle === "reveal"){ showingAnswer = !showingAnswer; render(); }
-			} else if (act === "reset") {
+				if (my.flipStyle === "reveal"){
+					showingAnswer = !showingAnswer;
+					render();
+					if (my.auto) restartTimer();
+				}
+			}else if (act === "reset") {
+				stopTimer();
 				showingAnswer = false;
 				my.auto = false;                       // force manual mode
 				const next = save({ ...my, auto:false });
@@ -467,9 +620,9 @@
 				reseedIfNeeded(true);
 				render();                               // ⏸️ shows, timer won’t restart
 				// no restartTimer(); (auto is off now)
-			} else if (act === "config"){
+			}else if (act === "config"){
 				toggleConfig(true);
-			} else if (act === "purge") {
+			}else if (act === "purge") {
 				stopTimer();
 				cancelPendingSave(); // <-- prevent a stale deferred write from restoring data
 
@@ -522,6 +675,7 @@
 			const parsed = parseCSV(csvIn.value || "");
 			my.parsed = parsed.records; my.index=0; my.history = my.parsed.length ? [0] : []; my.pool=[];
 			reseedIfNeeded(true);
+			ensureInitialIndex();
 			const next = save({ ...my, rawCSV:(csvIn.value||""), sourceUrl:urlIn.value.trim(), parsed: my.parsed });
 			Object.assign(my, next);
 			errOut.textContent = parsed.errors.length
@@ -535,7 +689,11 @@
 		syncCfgInputs();
 		wireAutosave();
 		if (my.ui && my.ui.showConfig){ toggleConfig(true, { silent:true }); } // don't write during mount
-		reseedIfNeeded(false); showingAnswer=false; render(); restartTimer();
+		reseedIfNeeded(false);
+		ensureInitialIndex();
+		showingAnswer = false;
+		render();
+		restartTimer();
 
 		ro = new ResizeObserver(()=> render()); ro.observe(host);
 
