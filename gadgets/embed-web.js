@@ -1,13 +1,24 @@
 (function () {
 	const GID = 'EmbedWeb';
 
+	// --- History ---------------------------------------------------------
+	// v0.3.0  Basic Embed Web gadget (URL + iframe).
+	// v0.3.2  Added buffer margin + toolbar refinements.
+	// v0.3.3  Introduced debug rainbow colors + zoom diagnostics.
+	// v0.3.4  Flex + min-height fix to stop handle collapsing at high zoom.
+	// v0.3.5  Clean build: subtle colors, slimmer chrome, optional debug mode.
+	// ---------------------------------------------------------------------
+
+	// Toggle this to true while debugging layout (adds rainbow colors).
+	const DEBUG_COLORS = false;
+
 	// --- VizInt v1.0 manifest (per your schema) ---
 	const manifest = {
 		_api: "1.0",
 		_class: "EmbedWeb",
 		_type: "singleton",
 		_id: "EmbedWeb",
-		_ver: "v0.3.2", // bump per #code:versioning (adjust if your pipeline says otherwise)
+		_ver: "v0.3.5",
 		label: "Embed Web",
 		iconEmoji: "🌐",
 		capabilities: ["network"],
@@ -44,6 +55,7 @@
 		// --- DOM scaffold ---
 		root.innerHTML = "";
 		root.classList.add("vi-embedweb");
+		if (DEBUG_COLORS) root.classList.add("debug");
 
 		const css = document.createElement("style");
 		css.textContent = `
@@ -53,89 +65,82 @@
 			.vi-embedweb.blank .vi-ew-body { display: none; }
 			.vi-embedweb.blank .vi-ew-hint { display: block; }
 
-			/* Handle bar (slightly taller, larger hit-zone; pushes content when expanded) */
+			/* Handle bar: skinny, with slightly larger hit-zone; pushes content when expanded */
 			.vi-ew-handle {
-				height: 5px;
-				background: red;               /* DEBUG: bright red base line */
+				height: 4px;
+				background: rgba(0,0,0,.10);
 				position: relative;
 				overflow: hidden;
-				transition: height .15s ease;
+				transition: height .14s ease;
 				z-index: 3;
-				flex: 0 0 auto;                /* prevent flex from shrinking this below height */
+				flex: 0 0 auto; /* prevent flex from shrinking below its height */
 			}
-
 			/* Invisible hover/click zone to survive zoom quirks */
 			.vi-ew-handle::before {
 				content: "";
 				position: absolute;
 				left: 0; right: 0; top: 0;
-				height: 14px;
-				background: rgba(255, 0, 0, 0.15); /* DEBUG: faint red band for hit zone */
+				height: 10px;
+				background: transparent;
 				pointer-events: auto;
 			}
-
 			.vi-ew-handle.expanded {
-				height: 32px;                  /* taller when open */
-				min-height: 24px;              /* extra guard against being squashed */
-				background: orange;            /* DEBUG: orange when expanded */
-				border-bottom: 1px solid rgba(0,0,0,.12);
+				height: 24px;         /* slimmer than debug build */
+				min-height: 18px;     /* still large enough not to collapse */
+				background: rgba(255,255,255,.96);
+				border-bottom: 1px solid rgba(0,0,0,.10);
 			}
 
 			/* Micro-toolbar centered inside the handle bar */
 			.vi-ew-tools {
 				position: absolute; left: 50%; top: 50%;
 				transform: translate(-50%, -50%);
-				display: flex; gap: 6px; align-items: center;
+				display: flex; gap: 4px; align-items: center;
 				opacity: 0; pointer-events: none;
 				transition: opacity .12s ease;
-				z-index: 4;                     /* sits above iframe/body */
-				background: rgba(0, 0, 255, 0.3); /* DEBUG: semi-transparent blue bar */
-				padding: 2px 6px;
-				border-radius: 8px;
+				z-index: 4; /* sits above iframe/body */
+				background: rgba(0,0,0,0.02);
+				padding: 1px 4px;
+				border-radius: 6px;
 			}
 			.vi-ew-handle.expanded .vi-ew-tools {
 				opacity: 1; pointer-events: auto;
 			}
 			.vi-ew-toolbtn {
 				border: 0; background: transparent; cursor: pointer;
-				padding: 2px 6px; font-size: 12px; border-radius: 6px;
-				color: #fff;                     /* white text on blue background */
+				padding: 1px 4px; font-size: 11px; border-radius: 4px;
+				color: inherit;
 			}
-			.vi-ew-toolbtn:hover { background: rgba(255,255,255,.2); }
+			.vi-ew-toolbtn:hover { background: rgba(0,0,0,.06); }
 
 			/* Popover: URL + buffer dropdown */
 			.vi-ew-pop {
-				position: absolute; z-index: 20; top: 10px; left: 10px;
+				position: absolute; z-index: 20; top: 8px; left: 8px;
 				display: none; padding: 6px; border: 1px solid #ccc; border-radius: 6px;
-				background: var(--vi-panel, #fff); box-shadow: 0 2px 8px rgba(0,0,0,.15);
+				background: var(--vi-panel, #fff); box-shadow: 0 2px 6px rgba(0,0,0,.12);
 				font-size: 12px;
 			}
 			.vi-ew-pop.show { display: block; }
 			.vi-ew-pop form { display: flex; flex-direction: column; gap: 4px; }
 
 			.vi-ew-input {
-				width: 360px; max-width: 62vw; height: 24px; padding: 0 6px;
+				width: 320px; max-width: 62vw; height: 22px; padding: 0 6px;
 				border: 1px solid #ccc; border-radius: 4px; font-size: 12px;
 			}
 			.vi-ew-row {
 				display: flex; align-items: center; gap: 4px;
 			}
-			.vi-ew-row label { white-space: nowrap; }
+			.vi-ew-row label { white-space: nowrap; font-size: 11px; }
 			.vi-ew-buffer-select {
 				height: 22px;
-				font-size: 12px;
+				font-size: 11px;
 			}
 
 			/* Iframe panel; extra whitespace buffer is applied as margin-top on this */
-			.vi-ew-body {
-				position: relative;
-				z-index: 1;
-				background: rgba(0, 255, 0, 0.08); /* DEBUG: faint green behind iframe */
-			}
+			.vi-ew-body { position: relative; z-index: 1; }
 			.vi-ew-iframe {
-				width: 100%; height: 480px; border: 0; display: block;
-				background: #fff;
-				position: relative; z-index: 1;
+				width: 100%; height: 460px; border: 0; display: block;
+				background: #fff; position: relative; z-index: 1;
 			}
 			/* While tools are open, prevent iframe from eating pointer events */
 			.vi-embedweb.tools-open .vi-ew-iframe {
@@ -145,10 +150,9 @@
 			/* Compact inline error */
 			.vi-ew-error {
 				position: absolute; top: 8px; right: 8px; z-index: 5;
-				font-size: 12px; background: #fff7f7; color: #a40000;
-				border: 1px solid #f0b3b3; border-radius: 6px; padding: 6px 8px;
-				display: none; gap: 8px; align-items: center;
-				box-shadow: 0 0 0 2px rgba(255, 0, 0, 0.3); /* DEBUG: external red halo */
+				font-size: 11px; background: #fff7f7; color: #a40000;
+				border: 1px solid #f0b3b3; border-radius: 6px; padding: 4px 6px;
+				display: none; gap: 6px; align-items: center;
 			}
 			.vi-ew-error.show { display: inline-flex; }
 			.vi-ew-errlink { text-decoration: underline; cursor: pointer; }
@@ -158,7 +162,21 @@
 				display: none;
 				font-size: 12px; color: #555; padding: 8px 6px;
 			}
-	`;
+
+			/* Debug rainbow mode (opt-in via DEBUG_COLORS) */
+			.vi-embedweb.debug .vi-ew-handle {
+				background: red !important;
+			}
+			.vi-embedweb.debug .vi-ew-handle.expanded {
+				background: orange !important;
+			}
+			.vi-embedweb.debug .vi-ew-tools {
+				background: rgba(0,0,255,0.3) !important;
+			}
+			.vi-embedweb.debug .vi-ew-body {
+				background: rgba(0,255,0,0.08) !important;
+			}
+		`;
 		root.appendChild(css);
 
 		// Handle bar + centered toolbar
@@ -182,7 +200,7 @@
 		const settingsRow = el("div", "vi-ew-row");
 		const bufferLabel = el("label", "", null, "Toolbar buffer:");
 		const bufferSelect = el("select", "vi-ew-buffer-select");
-		[0, 3, 5, 8, 10, 15].forEach((v) => {
+		[0, 2, 4, 6, 8, 12].forEach((v) => {
 			const opt = document.createElement("option");
 			opt.value = String(v);
 			opt.textContent = v + " px";
@@ -226,7 +244,7 @@
 		// apply buffer whitespace (uses gadget settings)
 		const applyBuffer = () => {
 			const s = S.get() || {};
-			const buf = typeof s.bufferPx === "number" ? s.bufferPx : 5;
+			const buf = typeof s.bufferPx === "number" ? s.bufferPx : 3; // slightly slimmer default
 			bufferSelect.value = String(buf);
 			body.style.marginTop = buf ? buf + "px" : "0px";
 		};
@@ -277,7 +295,7 @@
 		tEdit.addEventListener("click", () => {
 			const s = S.get() || {};
 			urlInput.value = s.url || "";
-			const buf = typeof s.bufferPx === "number" ? s.bufferPx : 5;
+			const buf = typeof s.bufferPx === "number" ? s.bufferPx : 3;
 			bufferSelect.value = String(buf);
 			pop.classList.add("show");
 			setTimeout(() => urlInput.focus(), 0);
