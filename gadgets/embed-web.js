@@ -7,15 +7,14 @@
 		_class: "EmbedWeb",
 		_type: "singleton",
 		_id: "EmbedWeb",
-		_ver: "v0.3.3",
+		_ver: "v0.3.2", // bump per #code:versioning (adjust if your pipeline says otherwise)
 		label: "Embed Web",
 		iconEmoji: "🌐",
-		capabilities: ["network"], // URL paste / navigation
+		capabilities: ["network"],
 		description:
 			"Embed external web content via <iframe>. Hover the very top edge to reveal a tiny toolbar (✏️ Edit / 🔄 Refresh / 🔗 Open).",
 	};
 
-	// Register with VizInt
 	window.GADGETS = window.GADGETS || {};
 	window.GADGETS[GID] = {
 		manifest,
@@ -26,7 +25,7 @@
 	};
 
 	function mount(root, ctx) {
-		// --- settings helpers ---
+		// --- settings helper: { url, bufferPx } ---
 		const S = (() => {
 			const read = () =>
 				(ctx && typeof ctx.getSettings === "function")
@@ -54,28 +53,28 @@
 			.vi-embedweb.blank .vi-ew-body { display: none; }
 			.vi-embedweb.blank .vi-ew-hint { display: block; }
 
-			/* Handle bar (expands downward to reveal toolbar; pushes content) */
+			/* Handle bar (slightly taller, larger hit-zone; pushes content when expanded) */
 			.vi-ew-handle {
-				height: 3px;
-				background: rgba(0,0,0,.1);
+				height: 5px;
+				background: rgba(0,0,0,.12);
 				position: relative;
 				overflow: hidden;
 				transition: height .15s ease;
 				z-index: 3;
 			}
-			/* Slightly larger invisible hit-zone for better zoom behaviour */
+			/* Invisible hover/click zone to survive zoom quirks */
 			.vi-ew-handle::before {
 				content: "";
 				position: absolute;
 				left: 0; right: 0; top: 0;
-				height: 12px;
+				height: 14px;
 				background: transparent;
 				pointer-events: auto;
 			}
 			.vi-ew-handle.expanded {
-				height: 28px; /* room for the toolbar */
+				height: 32px; /* a bit taller than before */
 				background: rgba(255,255,255,.96);
-				border-bottom: 1px solid rgba(0,0,0,.1);
+				border-bottom: 1px solid rgba(0,0,0,.12);
 			}
 
 			/* Micro-toolbar centered inside the handle bar */
@@ -85,7 +84,7 @@
 				display: flex; gap: 6px; align-items: center;
 				opacity: 0; pointer-events: none;
 				transition: opacity .12s ease;
-				z-index: 4; /* definitely above iframe/body */
+				z-index: 4; /* sits above iframe/body */
 			}
 			.vi-ew-handle.expanded .vi-ew-tools {
 				opacity: 1; pointer-events: auto;
@@ -96,26 +95,35 @@
 			}
 			.vi-ew-toolbtn:hover { background: rgba(0,0,0,.06); }
 
-			/* Inline popover for URL entry (triggered by ✏️ Edit) */
+			/* Popover: URL + buffer dropdown */
 			.vi-ew-pop {
 				position: absolute; z-index: 20; top: 10px; left: 10px;
 				display: none; padding: 6px; border: 1px solid #ccc; border-radius: 6px;
 				background: var(--vi-panel, #fff); box-shadow: 0 2px 8px rgba(0,0,0,.15);
+				font-size: 12px;
 			}
 			.vi-ew-pop.show { display: block; }
-			.vi-ew-pop form { display: flex; gap: 6px; align-items: center; }
+			.vi-ew-pop form { display: flex; flex-direction: column; gap: 4px; }
+
 			.vi-ew-input {
 				width: 360px; max-width: 62vw; height: 24px; padding: 0 6px;
 				border: 1px solid #ccc; border-radius: 4px; font-size: 12px;
 			}
+			.vi-ew-row {
+				display: flex; align-items: center; gap: 4px;
+			}
+			.vi-ew-row label { white-space: nowrap; }
+			.vi-ew-buffer-select {
+				height: 22px;
+				font-size: 12px;
+			}
 
-			/* Iframe panel (fixed height, per spec) */
+			/* Iframe panel; extra whitespace buffer is applied as margin-top on this */
 			.vi-ew-body { position: relative; z-index: 1; }
 			.vi-ew-iframe {
 				width: 100%; height: 480px; border: 0; display: block;
 				background: #fff; position: relative; z-index: 1;
 			}
-
 			/* While tools are open, prevent iframe from eating pointer events */
 			.vi-embedweb.tools-open .vi-ew-iframe {
 				pointer-events: none;
@@ -136,34 +144,52 @@
 				display: none;
 				font-size: 12px; color: #555; padding: 8px 6px;
 			}
-		`;
+	`;
 		root.appendChild(css);
 
 		// Handle bar + centered toolbar
 		const handle = el("div", "vi-ew-handle");
 		const tools = el("div", "vi-ew-tools");
-		const tEdit = btn("✏️", "Edit URL");
+		const tEdit = btn("✏️", "Edit URL & buffer");
 		const tRefresh = btn("🔄", "Refresh");
 		const tOpen = btn("🔗", "Open in new tab");
 		tools.append(tEdit, tRefresh, tOpen);
 		handle.appendChild(tools);
 
-		// Popover for URL (invoked by ✏️)
+		// Popover: URL + buffer dropdown
 		const pop = el("div", "vi-ew-pop");
 		const form = el("form");
-		const input = el("input", "vi-ew-input", {
+
+		const urlInput = el("input", "vi-ew-input", {
 			type: "text",
-			placeholder: "Paste a URL (http/https/file) and press Enter"
+			placeholder: "Paste a URL (http/https/file) and press Enter",
 		});
-		const bSave = btn("Save", "Save URL"); bSave.type = "submit";
-		const bCancel = btn("Cancel", "Cancel"); bCancel.type = "button";
-		form.append(input, bSave, bCancel);
+
+		const settingsRow = el("div", "vi-ew-row");
+		const bufferLabel = el("label", "", null, "Toolbar buffer:");
+		const bufferSelect = el("select", "vi-ew-buffer-select");
+		[0, 3, 5, 8, 10, 15].forEach((v) => {
+			const opt = document.createElement("option");
+			opt.value = String(v);
+			opt.textContent = v + " px";
+			bufferSelect.appendChild(opt);
+		});
+		settingsRow.append(bufferLabel, bufferSelect);
+
+		const buttonsRow = el("div", "vi-ew-row");
+		const bSave = btn("Save", "Save URL & buffer");
+		bSave.type = "submit";
+		const bCancel = btn("Cancel", "Cancel");
+		bCancel.type = "button";
+		buttonsRow.append(bSave, bCancel);
+
+		form.append(urlInput, settingsRow, buttonsRow);
 		pop.appendChild(form);
 
 		// Iframe body + error chip
 		const body = el("div", "vi-ew-body");
 		const iframe = el("iframe", "vi-ew-iframe", {
-			sandbox: "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+			sandbox: "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox",
 		});
 		const errorChip = el("div", "vi-ew-error");
 		errorChip.append(
@@ -172,17 +198,24 @@
 		);
 		body.append(iframe, errorChip);
 
-		// Blank-state instructions
 		const hint = el("div", "vi-ew-hint", null,
 			"No URL saved. Hover the very top edge to reveal the tiny toolbar, then click ✏️ to set one. Example: https://example.com or file:///C:/path/to/local.html"
 		);
 
 		root.append(handle, pop, body, hint);
 
-		// --- Expand/collapse helpers (hover + click + icon-bridge) ---
+		// --- expand/collapse helpers ---
 		let collapseTimer = null;
 
 		const isExpanded = () => handle.classList.contains("expanded");
+
+		// apply buffer whitespace (uses gadget settings)
+		const applyBuffer = () => {
+			const s = S.get() || {};
+			const buf = typeof s.bufferPx === "number" ? s.bufferPx : 5;
+			bufferSelect.value = String(buf);
+			body.style.marginTop = buf ? buf + "px" : "0px";
+		};
 
 		const expand = () => {
 			clearTimeout(collapseTimer);
@@ -213,51 +246,57 @@
 			}
 		};
 
-		// Expose control API so onInfoClick can reach us
+		// expose control API for onInfoClick
 		root.__api = { toggleBar };
 
-		// Hover behaviour
+		// Hover & click behaviour
 		handle.addEventListener("mouseenter", expand);
 		handle.addEventListener("mouseleave", () => collapseSoon(2000));
 		tools.addEventListener("mouseenter", expand);
 		tools.addEventListener("mouseleave", () => collapseSoon(2000));
-
-		// Click on thin handle toggles (but not clicks on buttons)
 		handle.addEventListener("click", (e) => {
 			if (e.target.closest(".vi-ew-tools")) return;
-			toggleBar(true);
+			toggleBar(true); // explicit click → stay open
 		});
 
-		// Popover actions
+		// Popover interactions
 		tEdit.addEventListener("click", () => {
-			input.value = S.get().url || "";
+			const s = S.get() || {};
+			urlInput.value = s.url || "";
+			const buf = typeof s.bufferPx === "number" ? s.bufferPx : 5;
+			bufferSelect.value = String(buf);
 			pop.classList.add("show");
-			setTimeout(() => input.focus(), 0);
+			setTimeout(() => urlInput.focus(), 0);
 		});
 		bCancel.addEventListener("click", () => pop.classList.remove("show"));
+
 		form.addEventListener("submit", (e) => {
 			e.preventDefault();
-			const url = (input.value || "").trim();
-			S.set({ url });
+			const url = (urlInput.value || "").trim();
+			const bufferPx = parseInt(bufferSelect.value, 10) || 0;
+			S.set({ url, bufferPx });
 			pop.classList.remove("show");
+			applyBuffer();
 			render(url);
 		});
 
-		// Other actions
+		// Refresh / open / error link
 		tRefresh.addEventListener("click", () => {
-			const url = S.get().url || "";
+			const url = (S.get().url || "").trim();
 			if (url) {
 				iframe.src = "";
 				requestAnimationFrame(() => { iframe.src = url; });
 			}
 		});
+
 		tOpen.addEventListener("click", () => {
-			const url = S.get().url || "";
+			const url = (S.get().url || "").trim();
 			if (url) window.open(url, "_blank", "noopener");
 		});
+
 		errorChip.querySelector(".vi-ew-errlink").addEventListener("click", () => tOpen.click());
 
-		// Iframe best-effort error signal
+		// Iframe best-effort error indicator
 		iframe.addEventListener("load", () => {
 			hideError();
 			try {
@@ -271,10 +310,12 @@
 			}
 		});
 
-		// Initial render
-		render(S.get().url || "");
+		// Initial render + buffer application
+		const initial = S.get() || {};
+		applyBuffer();
+		render(initial.url || "");
 
-		// helpers (inside mount)
+		// --- helpers inside mount ---
 		function render(url) {
 			hideError();
 			if (!url) {
@@ -302,7 +343,7 @@
 			return b;
 		}
 
-		// per-instance teardown with proper timer cleanup
+		// per-instance teardown with timer cleanup
 		root.__vi_unmount = () => {
 			try { clearTimeout(collapseTimer); } catch {}
 			try { delete root.__api; } catch {}
@@ -311,17 +352,17 @@
 		};
 	}
 
-	// global unmount just delegates to per-instance
+	// global unmount simply delegates
 	function unmount(root) {
 		if (root && root.__vi_unmount) root.__vi_unmount();
 	}
 
-	// Title-bar icon click → toggle toolbar open
+	// Title-bar icon click → open/close toolbar
 	function onInfoClick(ctx, { body }) {
 		try {
 			body && body.__api && typeof body.__api.toggleBar === "function" && body.__api.toggleBar(true);
 		} catch (e) {
-			// fall through; loader will show legacy info if needed
+			// if this fails, loader will show legacy Info dialog instead
 		}
 	}
 })();
