@@ -56,24 +56,28 @@
 			/* Handle bar (slightly taller, larger hit-zone; pushes content when expanded) */
 			.vi-ew-handle {
 				height: 5px;
-				background: rgba(0,0,0,.12);
+				background: red;               /* DEBUG: bright red base line */
 				position: relative;
 				overflow: hidden;
 				transition: height .15s ease;
 				z-index: 3;
+				flex: 0 0 auto;                /* prevent flex from shrinking this below height */
 			}
+
 			/* Invisible hover/click zone to survive zoom quirks */
 			.vi-ew-handle::before {
 				content: "";
 				position: absolute;
 				left: 0; right: 0; top: 0;
 				height: 14px;
-				background: transparent;
+				background: rgba(255, 0, 0, 0.15); /* DEBUG: faint red band for hit zone */
 				pointer-events: auto;
 			}
+
 			.vi-ew-handle.expanded {
-				height: 32px; /* a bit taller than before */
-				background: rgba(255,255,255,.96);
+				height: 32px;                  /* taller when open */
+				min-height: 24px;              /* extra guard against being squashed */
+				background: orange;            /* DEBUG: orange when expanded */
 				border-bottom: 1px solid rgba(0,0,0,.12);
 			}
 
@@ -84,7 +88,10 @@
 				display: flex; gap: 6px; align-items: center;
 				opacity: 0; pointer-events: none;
 				transition: opacity .12s ease;
-				z-index: 4; /* sits above iframe/body */
+				z-index: 4;                     /* sits above iframe/body */
+				background: rgba(0, 0, 255, 0.3); /* DEBUG: semi-transparent blue bar */
+				padding: 2px 6px;
+				border-radius: 8px;
 			}
 			.vi-ew-handle.expanded .vi-ew-tools {
 				opacity: 1; pointer-events: auto;
@@ -92,8 +99,9 @@
 			.vi-ew-toolbtn {
 				border: 0; background: transparent; cursor: pointer;
 				padding: 2px 6px; font-size: 12px; border-radius: 6px;
+				color: #fff;                     /* white text on blue background */
 			}
-			.vi-ew-toolbtn:hover { background: rgba(0,0,0,.06); }
+			.vi-ew-toolbtn:hover { background: rgba(255,255,255,.2); }
 
 			/* Popover: URL + buffer dropdown */
 			.vi-ew-pop {
@@ -119,10 +127,15 @@
 			}
 
 			/* Iframe panel; extra whitespace buffer is applied as margin-top on this */
-			.vi-ew-body { position: relative; z-index: 1; }
+			.vi-ew-body {
+				position: relative;
+				z-index: 1;
+				background: rgba(0, 255, 0, 0.08); /* DEBUG: faint green behind iframe */
+			}
 			.vi-ew-iframe {
 				width: 100%; height: 480px; border: 0; display: block;
-				background: #fff; position: relative; z-index: 1;
+				background: #fff;
+				position: relative; z-index: 1;
 			}
 			/* While tools are open, prevent iframe from eating pointer events */
 			.vi-embedweb.tools-open .vi-ew-iframe {
@@ -135,6 +148,7 @@
 				font-size: 12px; background: #fff7f7; color: #a40000;
 				border: 1px solid #f0b3b3; border-radius: 6px; padding: 6px 8px;
 				display: none; gap: 8px; align-items: center;
+				box-shadow: 0 0 0 2px rgba(255, 0, 0, 0.3); /* DEBUG: external red halo */
 			}
 			.vi-ew-error.show { display: inline-flex; }
 			.vi-ew-errlink { text-decoration: underline; cursor: pointer; }
