@@ -7,9 +7,10 @@
 	// v0.3.3  Introduced debug rainbow colors + zoom diagnostics.
 	// v0.3.4  Flex + min-height fix to stop handle collapsing at high zoom.
 	// v0.3.5  Clean build: subtle colors, slimmer chrome, optional debug mode.
+	// v0.3.6  Debug checkbox in popover; debugColors persisted in settings.
 	// ---------------------------------------------------------------------
 
-	// Toggle this to true while debugging layout (adds rainbow colors).
+	// Default for new instances; settings.debugColors overrides this.
 	const DEBUG_COLORS = false;
 
 	// --- VizInt v1.0 manifest (per your schema) ---
@@ -18,7 +19,7 @@
 		_class: "EmbedWeb",
 		_type: "singleton",
 		_id: "EmbedWeb",
-		_ver: "v0.3.5",
+		_ver: "v0.3.6",
 		label: "Embed Web",
 		iconEmoji: "🌐",
 		capabilities: ["network"],
@@ -36,7 +37,7 @@
 	};
 
 	function mount(root, ctx) {
-		// --- settings helper: { url, bufferPx } ---
+		// --- settings helper: { url, bufferPx, debugColors } ---
 		const S = (() => {
 			const read = () =>
 				(ctx && typeof ctx.getSettings === "function")
@@ -55,7 +56,6 @@
 		// --- DOM scaffold ---
 		root.innerHTML = "";
 		root.classList.add("vi-embedweb");
-		if (DEBUG_COLORS) root.classList.add("debug");
 
 		const css = document.createElement("style");
 		css.textContent = `
@@ -113,7 +113,7 @@
 			}
 			.vi-ew-toolbtn:hover { background: rgba(0,0,0,.06); }
 
-			/* Popover: URL + buffer dropdown */
+			/* Popover: URL + buffer dropdown + debug checkbox */
 			.vi-ew-pop {
 				position: absolute; z-index: 20; top: 8px; left: 8px;
 				display: none; padding: 6px; border: 1px solid #ccc; border-radius: 6px;
@@ -134,6 +134,9 @@
 			.vi-ew-buffer-select {
 				height: 22px;
 				font-size: 11px;
+			}
+			.vi-ew-debug-check {
+				width: 14px; height: 14px;
 			}
 
 			/* Iframe panel; extra whitespace buffer is applied as margin-top on this */
@@ -163,7 +166,7 @@
 				font-size: 12px; color: #555; padding: 8px 6px;
 			}
 
-			/* Debug rainbow mode (opt-in via DEBUG_COLORS) */
+			/* Debug rainbow mode (opt-in via debug checkbox / DEBUG_COLORS) */
 			.vi-embedweb.debug .vi-ew-handle {
 				background: red !important;
 			}
@@ -188,7 +191,7 @@
 		tools.append(tEdit, tRefresh, tOpen);
 		handle.appendChild(tools);
 
-		// Popover: URL + buffer dropdown
+		// Popover: URL + buffer dropdown + debug checkbox
 		const pop = el("div", "vi-ew-pop");
 		const form = el("form");
 
@@ -208,6 +211,14 @@
 		});
 		settingsRow.append(bufferLabel, bufferSelect);
 
+		const debugRow = el("div", "vi-ew-row");
+		const debugChk = el("input", "vi-ew-debug-check", {
+			type: "checkbox",
+			id: "vi-ew-debug-toggle"
+		});
+		const debugLabel = el("label", "", { for: "vi-ew-debug-toggle" }, "Debug colors (rainbow)");
+		debugRow.append(debugChk, debugLabel);
+
 		const buttonsRow = el("div", "vi-ew-row");
 		const bSave = btn("Save", "Save URL & buffer");
 		bSave.type = "submit";
@@ -215,7 +226,7 @@
 		bCancel.type = "button";
 		buttonsRow.append(bSave, bCancel);
 
-		form.append(urlInput, settingsRow, buttonsRow);
+		form.append(urlInput, settingsRow, debugRow, buttonsRow);
 		pop.appendChild(form);
 
 		// Iframe body + error chip
@@ -247,6 +258,15 @@
 			const buf = typeof s.bufferPx === "number" ? s.bufferPx : 3; // slightly slimmer default
 			bufferSelect.value = String(buf);
 			body.style.marginTop = buf ? buf + "px" : "0px";
+		};
+
+		// apply debug rainbow mode
+		const applyDebug = () => {
+			const s = S.get() || {};
+			const saved = (typeof s.debugColors === "boolean") ? s.debugColors : undefined;
+			const dbg = (saved !== undefined) ? saved : DEBUG_COLORS;
+			if (dbg) root.classList.add("debug");
+			else root.classList.remove("debug");
 		};
 
 		const expand = () => {
@@ -297,18 +317,27 @@
 			urlInput.value = s.url || "";
 			const buf = typeof s.bufferPx === "number" ? s.bufferPx : 3;
 			bufferSelect.value = String(buf);
+
+			const savedDbg = (typeof s.debugColors === "boolean") ? s.debugColors : undefined;
+			const dbg = (savedDbg !== undefined) ? savedDbg : root.classList.contains("debug");
+			debugChk.checked = !!dbg;
+
 			pop.classList.add("show");
 			setTimeout(() => urlInput.focus(), 0);
 		});
+
 		bCancel.addEventListener("click", () => pop.classList.remove("show"));
 
 		form.addEventListener("submit", (e) => {
 			e.preventDefault();
 			const url = (urlInput.value || "").trim();
 			const bufferPx = parseInt(bufferSelect.value, 10) || 0;
-			S.set({ url, bufferPx });
+			const debugColors = !!debugChk.checked;
+
+			S.set({ url, bufferPx, debugColors });
 			pop.classList.remove("show");
 			applyBuffer();
+			applyDebug();
 			render(url);
 		});
 
@@ -342,9 +371,10 @@
 			}
 		});
 
-		// Initial render + buffer application
+		// Initial render + buffer + debug application
 		const initial = S.get() || {};
 		applyBuffer();
+		applyDebug();
 		render(initial.url || "");
 
 		// --- helpers inside mount ---
