@@ -1,270 +1,357 @@
-# 🚀 VizInt System Specification (v1.2)
+# VizInt System Specification – v1.2
 
-This document unifies and supersedes the previous **VizInt-Gadgets.md** and **VizInt-Portal-1.1.md** specs into a single, structured reference for the entire VizInt platform.
-
-**Sections:**
-
-1. VizInt System Architecture
-2. Portal System Specification
-3. Gadget API v1.1
-
-_## 1. VizInt System Architecture
-
-The VizInt platform consists of four coordinated layers, each with clearly defined responsibilities and communication pathways.
-
-### **1.1 Portal Layer (Core Engine)**
-
-The central orchestration system responsible for:
-
-* Gadget discovery, registration, and multi-instantiation
-* Shared library loading and lifecycle
-* Storage management (namespaced, ring‑fenced, portable)
-* System settings & environment state
-* Inter-gadget messaging and notifications
-* Crash recovery, reset flows
-
-### **1.2 Shared Libraries Layer (System Services)**
-
-Shared libraries are system-level services exposed to gadgets via `ctx.shared`. There are **two categories**:
-
-#### 1.2.1 Implicit Runtime Services (Always Present)
-
-These are part of the core VizInt runtime and are **always available** to every gadget instance, regardless of its declared capabilities:
-
-* `ctx.shared.Nexus`
-
-  * Event bus for portal ↔ gadget ↔ gadget messaging
-  * Used for notifications, ticker routing, cross-gadget signals, and control messages
-
-* `ctx.shared.Vault`
-
-  * Backing implementation for `ctx.storage`
-  * Handles namespaced, ring-fenced storage and abstracts over localStorage / future backends
-
-These services are **imposed by the Portal** and should be treated as part of the baseline environment (like the DOM), not optional helpers.
-
-#### 1.2.2 Capability-Driven Services (Opt-in Extensions)
-
-These services are only guaranteed when a gadget explicitly declares the corresponding capability in its manifest. The Portal uses `capabilities` to decide which helpers to wire up, warm, or permission-check.
-
-* Capability: `"chronus"` → `ctx.shared.Chronus`
-
-  * Time/date/timezone helpers, end-of-month calculations, relative offsets, etc.
-
-* Capability: `"atlas"` → `ctx.shared.Atlas`
-
-  * Geo resolution (IP + device), best-geo resolver, `{lat, lng, country, source}` helpers.
-
-* Capability: `"network"`
-
-  * Signals that the gadget will talk to remote APIs.
-  * May map to a future `ctx.shared.Network` helper for fetch wrappers / offline-aware semantics.
-
-* Capability: `"served"`
-
-  * Marker that the gadget MUST be run from `http://` or `https://` and is not supported on `file://` origins.
-  * This is a **constraint flag**, not a library.
-
-The **contract** is:
-
-* If a capability is declared, the matching helper (e.g. `ctx.shared.Chronus`) will be present and ready.
-* Gadgets SHOULD only consume capability-driven helpers they have declared, plus the universal runtime services (`Nexus`, `Vault`).
-
-### **1.3 Chrome / UX Layer**
-
-*
-
-The visual and interaction framework of the portal:
-
-* Gadget chrome (titlebar, handles, gear, info button)
-* Ticker tape and toast notifications
-* Themes (Light, Dark, Sticky‑Note, Dynamic, System)
-* Drag/reposition support
-* Grid layout & multi‑height support
-
-### **1.4 Gadget Layer (User-Facing Components)**
-
-Self‑contained modules that:
-
-* Implement the `manifest` and lifecycle (`mount`, `unmount`)
-* Declare capabilities (chronus, atlas, network, served)
-* Consume shared libraries & storage via `ctx`
-* Provide features directly to the user
-* Support multi-instance when enabled
-
-Gadgets never load shared libraries themselves and never directly modify storage outside their namespace.
+*(Complete, canonical, architecture-level specification for the VizInt Platform. Mixed normative language applied: MUST / SHOULD / MAY.)*
 
 ---
 
-## 2. Portal System Specification
+# 0. Purpose of this Document
 
-This section defines what the **Portal** guarantees to all gadgets and shared libraries. It merges and formalizes the content of the former `VizInt-Portal-1.1.md` into a coherent contract.
+This **System Specification** defines the *architecture*, *shared libraries*, *capabilities model*, *storage doctrine*, *IPC/event model*, *layout framework*, and *gadget contract* used across the entire VizInt ecosystem.
 
-### 2.1 Ownership & Channels
+It serves as the **top-level reference** for all subsystem prompts, FRTP cycles, and downstream component specifications (Portal Spec, Gadget Authoring Spec, Chronus Spec, Atlas Spec, etc.).
 
-* **Owner Channel:** `VizInt Portal`
-* **Collaborating Channels:**
-
-  * `VizInt project planning` — prioritization, roadmap, and cross-cutting decisions
-  * `Chronus design updates` — consumers of Chronus/Atlas once shared libs are in place
-  * `Improve VizInt UX` — chrome, themes, drag/reposition, ticker/toast visuals
-  * `Generic Plug-in Design` — reference gadgets and multi-instance skeletons
-
-### 2.2 Core Responsibilities
-
-The Portal is responsible for:
-
-* Discovering available gadgets
-* Creating and destroying gadget instances
-* Providing a consistent **`ctx` object** to every gadget
-* Loading and wiring shared libraries (Chronus, Atlas, Nexus, Vault, etc.)
-* Managing namespaced storage and import/export flows
-* Handling notifications (toasts, ticker) at the infrastructure level
-* Providing global and per-session reset mechanisms
-
-### 2.3 Requirements (A-Series)
-
-> Numbering follows the existing BASIC-style increments from the A-series in the original portal spec.
-
-#### **A10 — SUPPORT gadget instantiation from dynamic registry**
-
-**Priority:** P0
-The Portal MUST support enabling, disabling, and instantiating gadgets from a dynamic registry:
-
-* Allow **multiple instances** for gadgets marked `instantiable` in their manifest
-* Maintain independent settings per instance
-* Ensure consistent mount/unmount lifecycle and ID tracking (e.g. `Clock:Local`, `Clock:London`)
+This spec **does not** define portal chrome, badge visuals, or gadget UI-specific rules — those reside in **Portal Spec** and **Gadget Authoring Spec**.
 
 ---
 
-#### **A11 — PROVIDE uniform shared library access**
+# 1. System Overview
 
-**Priority:** P0
-The Portal MUST expose shared libraries via `ctx.shared` for all gadgets:
+VizInt is a client-side modular dashboard system supporting:
 
-* e.g., `ctx.shared.Chronus`, `ctx.shared.Atlas`, `ctx.shared.Nexus`, `ctx.shared.Vault`
-* Gadgets MUST NOT import these modules directly or re-implement their logic
-* Shared libraries MUST be initialized once by the Portal before any gadget mounts
+* Multi-gadget execution
+* Uniform shared libraries (`ctx.libs`)
+* Dynamic instancing & per-instance settings
+* Strong storage isolation
+* A universal cross-gadget event bus
+* Standardized gadget manifests
+* Mixed human/AI team collaboration through FRTP
 
----
+Guiding principles:
 
-#### **A12 — DEFINE standard component loader protocol**
-
-**Priority:** P0
-The Portal MUST own script loading and dependency management:
-
-* Provide a standard mechanism (e.g. internal `loadSharedOnce()` / `loadGadgetOnce()`) that guarantees single-load semantics
-* Ensure load order: shared libs → history → loader → gadgets
-* Prevent gadgets from individually creating duplicate `<script>` tags for shared libs
-
----
-
-#### **A13 — AUDIT gadgets for redundant definitions**
-
-**Priority:** P0
-The Portal workstream MUST include a hygiene phase:
-
-* Identify duplicated code across gadgets (geo, time math, loaders, storage helpers)
-* Migrate those utilities into shared libs under `ctx.shared`
-* Replace in-gadget implementations with calls to the unified helpers
+* **Isolation**: Gadgets MUST NOT interfere with each other.
+* **Predictability**: Load order, shared libs, and capabilities MUST behave consistently.
+* **Extensibility**: Shared libraries MUST grow without breaking existing gadgets.
+* **Replaceability**: Gadgets SHOULD NOT depend on unspecified runtime side effects.
+* **Transparency**: Settings MUST be clearly partitioned and accessible.
+* **Protocol Discipline**: All cross-stream communication follows Volk/FRTP.
 
 ---
 
-#### **A14 — IMPLEMENT Notification Hub (Toasts, Ticker Tape)**
+# 2. Shared Library Layer (`ctx.libs`)
 
-**Priority:** P1
-The Portal MUST provide a central notification service (internally built on Nexus):
+Gadgets receive shared system libraries through:
 
-* Ticker tape API for `{title, content, rotations, rotationInterval, windowFrom, windowTo}`
-* Toast API for short-lived, non-blocking messages
-* Mechanism for gadgets to request icon flashing or highlighting when they originate a notification
+```js
+const { Core, Chronus, Atlas, Nexus } = ctx.libs;
+```
 
-(Visual rendering of ticker and toasts resides in the **Chrome/UX** workstream; the Portal defines the API and routing.)
+These MUST be preloaded and ready by the time `mount()` is called.
 
----
+## 2.1 Library List
 
-#### **A15 — ESTABLISH Atlas subsystem for geo-services**
+### **2.1.1 Core (Expanded Core, v1.2)**
 
-**Priority:** P0
-Atlas MUST be the exclusive provider of geo-related functionality:
+Core MUST provide:
 
-* Integrate IP-based fallback and browser geolocation logic
-* Expose a standard shape `{lat, lng, country, source}`
-* Handle permission probing (e.g., do not prompt when running on `file://`)
-* Provide deterministic fallback locations when geo cannot be resolved
+* Pure helper utilities
+* String helpers
+* Math helpers
+* Date helpers (non-chronus-specific)
+* DOM helpers
+* Event helpers
+* Formatting utilities
+* Parsing helpers
+* Validation helpers
+* Layout helpers (geometry classification)
 
-All gadgets requiring location MUST go through `ctx.shared.Atlas`.
+**Backlog:** Split into `Core` + `ExtendedCore` in v1.3+, co-owned by U:Portal & U:Orchestrator.
 
----
+### **2.1.2 Chronus**
 
-#### **A16 — REFACTOR LocalStorage into managed namespaces**
+Provides:
 
-**Priority:** P0
-The Portal MUST prevent gadgets from free-form localStorage access:
+* Time calculations
+* DST adjustment
+* Time zone logic
+* PrayerTime providers (through Chronus provider architecture)
 
-* Assign each gadget (and instance) a unique namespace
-* Forbid direct access to `window.localStorage` in gadget guidelines
-* Route all reads/writes through `ctx.storage` (backed by Vault)
-* Ensure the portal’s own settings (dock layout, theme, registry preferences) live in a separate, protected namespace
+Chronus MUST NOT depend on Atlas but MAY accept Atlas objects as parameters.
 
----
+### **2.1.3 Atlas**
 
-#### **A17 — BUILD Storage Manager UI**
+Provides:
 
-**Priority:** P0
-The Portal MUST expose a **Storage Manager** view (likely via a dedicated gadget):
+* Geo lookup
+* City metadata
+* Fine-grain geolocation when allowed
+* Geo fallback & best-guess logic
+* Canonical Location objects
 
-* Show total storage use and per-gadget/instance breakdown
-* Allow browsing and deleting keys per silo
-* Support export/import of gadget silos to portable JSON
-* Offer a global "nuke from orbit" option to wipe all state
+### **2.1.4 Nexus**
 
----
+The system coordination hub. Nexus MUST provide:
 
-#### **A18 — IMPLEMENT crash-recovery page (reset.html)**
+* **Global event bus**
+* **Ticker wiring**
+* **Future modal orchestration**
 
-**Priority:** P1
-The Portal MUST provide an out-of-band recovery page:
+Nexus MUST automatically inject:
 
-* `reset.html` that can be opened independently when the main portal is broken
-* Controls to clear all data or selectively reset individual silos (per gadget/instance)
+* `from: ctx.name`
+* `ts: Date.now()`
 
----
+Gadgets MUST NOT override `from`.
 
-#### **A19 — ADD version history timestamps**
+Canonical message envelope:
 
-**Priority:** P1
-The Portal MUST include dates in the version history:
-
-* Update `history.js` entries to include `(YYYY-MM-DD)` or similar next to the `#NNN` version tag
-* Ensure the header gadget can display this nicely
-
----
-
-#### **A20 — ENABLE dynamic registry discovery**
-
-**Priority:** P1
-The Portal MUST replace hardcoded gadget lists with a dynamic registry:
-
-* Maintain a persisted gadget library of known gadgets
-* Support scanning the `/gadgets/` folder (or configured URLs) to discover new gadgets
-* Provide UI to enable/disable gadgets from that library
+```js
+{
+  from: "Vz:Clock:Local", // auto
+  to: "Vz:Other:Instance" | null, // null → Portal
+  ts: 1234567890,
+  channel: "ticker" | "custom" | null,
+  level: "info" | "warn" | "error" | undefined,
+  data: { /* freeform */ }
+}
+```
 
 ---
 
-#### **A21 — DEFINE full portal-level settings**
+# 3. Capability Model
 
-**Priority:** P1
-The Portal MUST provide a centralized settings surface including:
+Capabilities express *intent*, not entitlement.
 
-* Refresh cadence / auto-refresh strategies
-* Import/export of **portal** settings (separate from gadget silos)
-* Theme selection: `Light`, `Dark`, `Dynamic (sunrise/sunset)`, `Follow-system`
-* Opt-in toggle for fine-grained geolocation
-* A "trash" or "factory reset" control to clear portal-level state
+Valid capabilities:
+
+* `chronus`
+* `atlas`
+* `network`
+* `served`
+
+## 3.1 Semantics
+
+* Portal MUST preload Chronus & Atlas for all gadgets.
+* Capabilities SHOULD determine UI badges.
+* The `served` capability MUST trigger a ⚠ warning on `file:///`.
+* Gadgets MUST still mount on `file:///` even if they request `served`.
 
 ---
 
+# 4. Storage & Settings Doctrine
+
+Gadgets MUST NOT know or manipulate storage keys.
+
+Portal MUST expose a wrapper:
+
+```js
+ctx.getSettings(key, defaultValue)
+ctx.setSettings(patch)
+ctx.resetSettings() // clears this instance only
+```
+
+Storage MUST be transparently mapped to:
+
+```
+Vz:<Class>:<Instance>
+```
+
+Storage MUST be:
+
+* Per-instance by default
+* Per-class for bulk deletion
+* Sync for v1.2
+
+Writes SHOULD be debounced (≥ 100ms).
+
+Ephemeral UI state MUST NOT be persisted.
+
+Gadgets MUST NOT call setSettings() inside mount().
+
 ---
 
-_
+# 5. Gadget API (Conceptual Contract)
+
+Every gadget MUST define a manifest containing:
+
+* `_api: "1.0"`
+* `_class`
+* `_type: "singleton" | "instantiable"`
+* `_id`
+* `_ver`
+* `label`
+* `description`
+* `capabilities`
+* `supportsSettings` (optional)
+
+Canonical name:
+
+```
+Vz:<Class>:<Instance>
+```
+
+## 5.1 Mount Contract
+
+Gadgets MUST implement:
+
+```js
+export function mount(host, ctx) { ... }
+```
+
+Where:
+
+* `host` is the viewport container
+* `ctx` includes:
+
+  * `name`
+  * `host`
+  * `env`
+  * `libs` (Core, Chronus, Atlas, Nexus)
+  * `getSettings`
+  * `setSettings`
+  * `resetSettings`
+
+Gadgets MUST NOT manipulate portal chrome.
+
+Gadgets MAY use Shadow DOM or scoped CSS.
+
+---
+
+# 6. Global Event Model (Nexus)
+
+## 6.1 Bus
+
+Nexus MUST expose:
+
+```js
+bus.emit(channel, payload)
+bus.on(channel, handler)
+```
+
+Channels MUST be namespaced for inter-gadget messages.
+
+## 6.2 Ticker
+
+* Uses `channel: "ticker"` and `level`
+* MUST be session-only
+* MUST route through Nexus
+
+## 6.3 Future Modals
+
+Future versions MAY add modal orchestration through Nexus.
+
+---
+
+# 7. Layout & Geometry Framework
+
+Portal MUST expose geometry metadata:
+
+```js
+ctx.env.geometry = { cols: n, rows: m }
+```
+
+Core MUST expose:
+
+```js
+Core.Layout.classify(geometry)
+```
+
+This MUST return:
+
+```js
+{
+  category: "square" | "wide" | "tall" | "large",
+  flags: {
+    isMultiCol: boolean,
+    colSpan: number
+  }
+}
+```
+
+Gadgets SHOULD adjust rendering based on category but MUST remain functional under all categories.
+
+---
+
+# 8. Versioning Model
+
+* System Spec: **v1.2**
+* Portal Spec: **v1.2**
+* Gadget API: **1.0** (stable for this cycle)
+
+Versioning MUST be forward-compatible across minor cycles.
+
+---
+
+# 9. Workstream Roles (High-Level)
+
+* **U:Architect** — Final authority over system design.
+* **U:Orchestrator** — Spec stewardship, sequencing, cross-team alignment.
+* **U:Portal** — Portal runtime owner.
+* **U:Chronus** — Time/DST provider logic.
+* **U:Atlas** — Geo provider logic.
+* **U:UX** — Chrome, badges, layout specifics.
+* **U:Gadgematix** — Gadget API guardian.
+* **U:Factory** — Gadget migrations & refactoring.
+
+---
+
+# 10. Deprecated Concepts & Migration
+
+## 10.1 `ctx.shared`
+
+* MUST be treated as deprecated
+* Portal MUST provide compatibility shim
+* Usage MUST trigger console warning
+
+## 10.2 Direct localStorage access
+
+* Gadgets MUST NOT directly access localStorage
+* Portal MAY warn when detecting it
+
+## 10.3 Legacy Gadgets
+
+Gadgets lacking `_api` MUST be treated as legacy and mounted best-effort.
+
+---
+
+# 11. System Lifecycle (Text Diagrams)
+
+## 11.1 High-Level Timeline
+
+```
+Portal Boot
+   ↓
+Load shared libraries (Core, Chronus, Atlas, Nexus)
+   ↓
+Scan & register gadgets
+   ↓
+Resolve capabilities
+   ↓
+Inject ctx.libs
+   ↓
+Call mount(host, ctx)
+   ↓
+Gadget performs first render
+   ↓
+Gadget subscribes to bus (Nexus)
+   ↓
+Gadget steady-state execution
+```
+
+## 11.2 Sequence Diagram (ASCII)
+
+```
+Portal          Nexus          Gadget
+  |               |               |
+  |--load libs-->|               |
+  |               |               |
+  |--mount(ctx)-->|--inject bus-->|
+  |               |               |
+  |               |<--subscribe---|
+  |               |               |
+  |<----events--------------------|
+  |               |               |
+```
+
+---
+
+# END OF SYSTEM SPEC v1.2
