@@ -1,5 +1,21 @@
 # TODO
 
+## Planning Channel:
+
+__
+
+1. Mk: Gadget Factory:
+* Hadith Rotator
+* Ma la yasa3 al-mu2min jahlu
+* Scriptlets browser
+
+2. +Portal:
+Download entire state (gadgets and all + settings) as zip file (though this is impossible?)
+
+3. Runway should support a hyper verbose view:
+
+Time elapsed / out of how much [ color coded schematic of # of chunks elapsed ___ & # chunks remaining ☐☐☐☐☐ ] Actual Time left
+
 ## VizInt Portal:
 
 - [x]	Support Dark Mode
