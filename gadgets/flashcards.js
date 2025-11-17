@@ -591,18 +591,18 @@
 
 			requestAnimationFrame(() => {
 				if (my.flipStyle === "inline") {
-					fitText(elInline.querySelector(".fc-q"), 18, 48);
-					fitText(elInline.querySelector(".fc-a"), 12, 24);
+					fitText(elInline.querySelector(".fc-q"), 24, 110);
+					fitText(elInline.querySelector(".fc-a"), 20, 96);
 					const nt = elInline.querySelector(".fc-notes");
-					if (nt) fitText(nt, 10, 16);
+					if (nt) fitText(nt, 12, 28);
 				} else {
 					if (!showingAnswer) {
-						fitText(elFront.querySelector(".fc-q"), 18, 56);
+						fitText(elFront.querySelector(".fc-q"), 24, 110);
 					} else {
-						fitText(elBack.querySelector(".fc-a"), 18, 56);
+						fitText(elBack.querySelector(".fc-a"), 24, 96);
 					}
 					const nt = elBack.querySelector(".fc-notes");
-					if (nt) fitText(nt, 10, 16);
+					if (nt) fitText(nt, 12, 28);
 				}
 			});
 		}
@@ -691,6 +691,10 @@
 		elControls.addEventListener("click", (e) => {
 			const b = e.target.closest("button[data-act]");
 			if (!b) return;
+
+			// Prevent bubbling into portal-level handlers and any default submit behavior
+			e.preventDefault();
+			e.stopPropagation();
 
 			const act = b.dataset.act;
 
@@ -896,6 +900,7 @@
 			width: 100%;
 			height: 100%;
 			display:flex;
+			flex-direction:column;
 			align-items:center;
 			justify-content:center;
 		}
