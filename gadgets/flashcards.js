@@ -142,6 +142,7 @@
 		return { records, errors, delimiter: delim };
 	}
 
+	// Shuffle utility (Fisher–Yates)
 	function shuffle(arr) {
 		const a = arr.slice();
 		for (let i = a.length - 1; i > 0; i--) {
@@ -151,6 +152,7 @@
 		return a;
 	}
 
+	// Fit text to container (simple heuristic: vary font-size by text length + container)
 	function fitText(el, minPx, maxPx) {
 		if (!el) return;
 		const txt = el.textContent || el.innerText || "";
@@ -170,9 +172,6 @@
 
 	// ===== Gadget =====
 	function mount(host, ctx) {
-		// host is our viewport root; we make it positioning context for the local overlay
-		host.classList.add("fc-host");
-
 		// Persisted (user intent only)
 		const s = ctx.getSettings();
 		const my = s.flashcards || {
@@ -206,6 +205,12 @@
 			}
 		}
 
+		function patternOr(a, b, fallback) {
+			if (a !== undefined) return a;
+			if (b !== undefined) return b;
+			return fallback;
+		}
+
 		// Persist only stable state (not runtime indexing)
 		function save(patch) {
 			const all = ctx.getSettings();
@@ -226,8 +231,7 @@
 					patch.intervalMs !== undefined
 						? patch.intervalMs
 						: current.intervalMs || 5000,
-				flipStyle:
-					patternOr(patch.flipStyle, current.flipStyle, "reveal"),
+				flipStyle: patternOr(patch.flipStyle, current.flipStyle, "reveal"),
 				ui: patch.ui !== undefined ? patch.ui : current.ui || { showConfig: false }
 			};
 
@@ -238,12 +242,6 @@
 			}, 120);
 
 			return nextPersist;
-		}
-
-		function patternOr(a, b, fallback) {
-			if (a !== undefined) return a;
-			if (b !== undefined) return b;
-			return fallback;
 		}
 
 		// DOM
@@ -258,77 +256,72 @@
 				<div class="fc-status muted fineprint"></div>
 				<hr class="fc-hr" />
 				<div class="fc-controls">
-					<button class="gbtn" data-act="prev"  title="Previous">⏮️</button>
-					<button class="gbtn" data-act="next"  title="Next">⏭️</button>
-					<button class="gbtn" data-act="mode"  title="Toggle Mode (Sequential / Diminishing Random)">🔁</button>
-					<button class="gbtn" data-act="auto"  title="Auto On/Off">▶️</button>
-					<button class="gbtn" data-act="flip"  title="Flip / Reveal">🔄</button>
-					<button class="gbtn" data-act="reset" title="Reset Deck">🧹</button>
+					<button type="button" class="gbtn" data-act="prev"  title="Previous">⏮️</button>
+					<button type="button" class="gbtn" data-act="next"  title="Next">⏭️</button>
+					<button type="button" class="gbtn" data-act="mode"  title="Toggle Mode (Sequential / Diminishing Random)">🔁</button>
+					<button type="button" class="gbtn" data-act="auto"  title="Auto On/Off">▶️</button>
+					<button type="button" class="gbtn" data-act="flip"  title="Flip / Reveal">🔄</button>
+					<button type="button" class="gbtn" data-act="reset" title="Reset Deck">🧹</button>
 					<span class="fc-flex"></span>
-					<button class="gbtn" data-act="config" title="Settings">⚙️</button>
-					<button class="gbtn" data-act="purge"  title="Erase Flash Cards data">🗑️</button>
+					<button type="button" class="gbtn" data-act="config" title="Settings">⚙️</button>
+					<button type="button" class="gbtn" data-act="purge"  title="Erase Flash Cards data">🗑️</button>
 				</div>
 			</div>
 
-			<!-- Local (in-gadget) overlay; fills only the gadget body -->
-			<div class="fc-overlay" style="display:none">
-				<div class="fc-cfg-panel cell3d">
-					<div class="fc-cfg-head">
-						<div class="fc-cfg-title">🎓 Flash Cards — Settings</div>
-						<div class="fc-cfg-actions">
-							<button class="gbtn" data-cfg="close" title="Close">✕</button>
-						</div>
+			<div class="fc-config cell3d" style="display:none">
+				<div class="fc-cfg-head">
+					<div class="fc-cfg-title">🎓 Flash Cards — Settings</div>
+					<div class="fc-cfg-actions">
+						<button type="button" class="gbtn" data-cfg="close" title="Close">✕</button>
 					</div>
-					<div class="fc-cfg-body">
-						<div class="field">
-							<label>Deck URL</label>
-							<input type="text" id="fc-url" placeholder="https://example.com/deck.csv" />
-						</div>
-						<div class="field">
-							<button class="gbtn" id="fc-load">Load from URL</button>
-							<span class="muted fineprint" id="fc-load-note"></span>
-						</div>
-						<div class="field" style="grid-template-columns:1fr;">
-							<label>Paste CSV</label>
-							<textarea id="fc-csv" rows="8" placeholder='"Side A","Side B","Notes"'></textarea>
-						</div>
-
-						<div class="field">
-							<label>Mode</label>
-							<select id="fc-mode">
-								<option value="drand">Diminishing Random</option>
-								<option value="sequential">Sequential</option>
-							</select>
-						</div>
-
-						<div class="field">
-							<label>Auto</label>
-							<select id="fc-auto">
-								<option value="on">On</option>
-								<option value="off">Off</option>
-							</select>
-						</div>
-
-						<div class="field">
-							<label>Interval (seconds)</label>
-							<input type="number" id="fc-interval" min="1" max="60" />
-						</div>
-
-						<div class="field">
-							<label>Answer Display</label>
-							<select id="fc-flip">
-								<option value="reveal">Flip to Answers</option>
-								<option value="inline">Include Answers</option>
-							</select>
-						</div>
-
-						<div class="field" style="grid-template-columns:1fr;">
-							<button class="gbtn" id="fc-save">Save</button>
-							<span id="fc-save-note" class="muted fineprint"></span>
-						</div>
-
-						<div id="fc-err" class="muted" style="white-space:pre-wrap;"></div>
+				</div>
+				<div class="fc-cfg-body">
+					<div class="field">
+						<label>Deck URL</label>
+						<input type="text" id="fc-url" placeholder="https://example.com/deck.csv" />
 					</div>
+					<div class="field">
+						<button type="button" class="gbtn" id="fc-load">Load from URL</button>
+						<span class="muted fineprint" id="fc-load-note"></span>
+					</div>
+					<div class="field" style="grid-template-columns:1fr;">
+						<label>Paste CSV</label>
+						<textarea id="fc-csv" rows="8" placeholder='"Side A","Side B","Notes"'></textarea>
+					</div>
+
+					<div class="field">
+						<label>Mode</label>
+						<select id="fc-mode">
+							<option value="drand">Diminishing Random</option>
+							<option value="sequential">Sequential</option>
+						</select>
+					</div>
+					<div class="field">
+						<label>Auto</label>
+						<select id="fc-auto">
+							<option value="on">On</option>
+							<option value="off">Off</option>
+						</select>
+					</div>
+					<div class="field">
+						<label>Interval (seconds)</label>
+						<input type="number" id="fc-interval" min="1" max="60" />
+					</div>
+
+					<div class="field">
+						<label>Answer Display</label>
+						<select id="fc-flip">
+							<option value="reveal">Flip to Answers</option>
+							<option value="inline">Include Answers</option>
+						</select>
+					</div>
+
+					<div class="field" style="grid-template-columns:1fr;">
+						<button type="button" class="gbtn" id="fc-save">Save</button>
+						<span id="fc-save-note" class="muted fineprint"></span>
+					</div>
+
+					<div id="fc-err" class="muted" style="white-space:pre-wrap;"></div>
 				</div>
 			</div>
 		`;
@@ -338,7 +331,7 @@
 		const elInline = host.querySelector(".fc-inline");
 		const elStatus = host.querySelector(".fc-status");
 		const elControls = host.querySelector(".fc-controls");
-		const elOverlay = host.querySelector(".fc-overlay");
+		const elConfig = host.querySelector(".fc-config");
 
 		const urlIn = host.querySelector("#fc-url");
 		const csvIn = host.querySelector("#fc-csv");
@@ -416,19 +409,13 @@
 			});
 		}
 
-		function toggleConfig(show, { silent = false } = {}) {
-			elOverlay.style.display = show ? "block" : "none";
-			elOverlay.classList.toggle("open", !!show);
+		function toggleConfig(show) {
+			elConfig.style.display = show ? "" : "none";
+			const ui = { ...(my.ui || {}), showConfig: !!show };
+			const next = save({ ui });
+			my.ui = ui;
+			Object.assign(my, next);
 
-			const nextState = !!show;
-			const prevState = !!(my.ui && my.ui.showConfig);
-
-			if (!silent && nextState !== prevState) {
-				const ui = { ...(my.ui || {}), showConfig: nextState };
-				const next = save({ ui });
-				my.ui = ui;
-				Object.assign(my, next);
-			}
 			if (show) stopTimer();
 			else restartTimer();
 		}
@@ -791,9 +778,6 @@
 		host
 			.querySelector('[data-cfg="close"]')
 			.addEventListener("click", () => toggleConfig(false));
-		elOverlay.addEventListener("click", (e) => {
-			if (e.target === elOverlay) toggleConfig(false);
-		});
 
 		loadBtn.addEventListener("click", async () => {
 			const url = urlIn.value.trim();
@@ -843,7 +827,7 @@
 			errOut.textContent =
 				parsed.errors.length > 0
 					? "Imported with some row issues:\n" +
-					  parsed.errors.map((e) => `Row ${e.row}: ${e.reason}`).join("\n")
+						parsed.errors.map((e) => `Row ${e.row}: ${e.reason}`).join("\n")
 					: "Imported successfully.";
 
 			saveNote.textContent = "Saved.";
@@ -859,7 +843,7 @@
 		syncCfgInputs();
 		wireAutosave();
 		if (my.ui && my.ui.showConfig) {
-			toggleConfig(true, { silent: true }); // don't write during mount
+			toggleConfig(true);
 		}
 
 		reseedIfNeeded(false);
@@ -868,32 +852,32 @@
 		render();
 		restartTimer();
 
+		// Resize observer for better fit
 		ro = new ResizeObserver(() => render());
 		ro.observe(host);
 
+		// Return unmount cleanup
 		return () => {
 			stopTimer();
-			try {
-				ro && ro.disconnect();
-			} catch (e) {
-				/* ignore */
+			if (ro) {
+				try {
+					ro.disconnect();
+				} catch {}
 			}
 		};
 	}
 
-	// Titlebar info-click → same path as ⚙
+	// Titlebar info-click → open the same config overlay (uses the gadget's own handler)
 	function onInfoClick(ctx, { slot, body }) {
-		const cfgBtn =
-			body && body.querySelector('.fc-controls button[data-act="config"]');
+		// Prefer to invoke the gadget's config action so timers/state behave identically
+		const cfgBtn = body && body.querySelector('.fc-controls button[data-act="config"]');
 		if (cfgBtn) {
 			cfgBtn.click();
 			return;
 		}
-		const overlay = body && body.querySelector(".fc-overlay");
-		if (overlay) {
-			overlay.style.display = "block";
-			overlay.classList.add("open");
-		}
+		// Fallback: force-show the overlay if the button isn't found
+		const cfg = body && body.querySelector('.fc-config');
+		if (cfg) cfg.style.display = "";
 	}
 
 	// Expose
@@ -902,38 +886,44 @@
 
 	// ===== Styles (scoped-ish) =====
 	const css = `
-	/* host becomes positioning context for in-gadget overlay */
-	.fc-host { position: relative; }
+		.fc-wrap { display:flex; flex-direction:column; gap:8px; height:100%; }
+		.fc-card {
+			display:flex; flex-direction:column; align-items:center; justify-content:center;
+			flex:1 1 auto;
+			min-height: 160px; padding: 8px;
+		}
+		.fc-front, .fc-back, .fc-inline {
+			width: 100%;
+			height: 100%;
+			display:flex;
+			align-items:center;
+			justify-content:center;
+		}
+		.fc-q, .fc-a {
+			font-weight:600;
+			text-align:center;
+		}
+		.fc-a { margin-top: 6px; }
+		.fc-notes { margin-top: 6px; font-size: 0.85em; }
+		.fc-status { text-align:right; }
 
-	.fc-wrap { display:flex; flex-direction:column; gap:8px; }
-	.fc-card { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:160px; padding:8px; }
-	.fc-front, .fc-back, .fc-inline { width:100%; }
+		.fc-hr { margin: 4px 0; opacity: 0.25; }
+		.fc-controls { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+		.fc-flex { flex:1; }
 
-	.fc-q, .fc-a { font-weight:600; }
-	.fc-a { margin-top:6px; }
-	.fc-notes { margin-top:6px; font-size:0.85em; color: var(--muted); }
-	.fc-status { text-align:right; }
+		.fc-config { position: relative; z-index: 2; }
+		.fc-cfg-head {
+			display:flex; align-items:center; justify-content:space-between;
+			margin:-8px -8px 8px -8px; padding:6px 8px;
+			border-bottom:1px solid rgba(0,0,0,0.08);
+		}
+		.fc-cfg-title { font-weight:600; }
+		.fc-cfg-body { display:block; }
+		.fc-config .field label { font-weight:600; }
+		.fc-config .field textarea, .fc-config .field input, .fc-config .field select { width:100%; }
 
-	.fc-hr { margin:2px 0; opacity:0.25; }
-	.fc-controls { display:flex; align-items:center; gap:4px; flex-wrap:nowrap; }
-	.fc-controls .gbtn { padding:1px 4px; min-width:unset; line-height:1.05; font-size:12px; }
-
-	/* In-gadget overlay fills only the gadget body */
-	.fc-overlay {
-		position:absolute; inset:0; display:none;
-		background:rgba(0,0,0,0.35); backdrop-filter:saturate(120%) blur(1px);
-		z-index: 5;
-	}
-	.fc-overlay.open { display:block; }
-	.fc-cfg-panel {
-		position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-		width:min(820px, 92%); max-height:86%; overflow:auto; padding:8px;
-	}
-	.fc-cfg-head { display:flex; align-items:center; justify-content:space-between; margin:-8px -8px 8px -8px; padding:6px 8px; border-bottom:1px solid rgba(0,0,0,0.08); }
-	.fc-cfg-title { font-weight:600; }
-	.fc-cfg-body { display:block; }
-	.fc-overlay .field label { font-weight:600; }
-	.fc-overlay .field textarea, .fc-overlay .field input, .fc-overlay .field select { width:100%; }
+		/* Theme-aware tweaks via existing CSS vars */
+		.fc-notes { color: var(--muted); }
 	`;
 	const style = document.createElement("style");
 	style.textContent = css;
