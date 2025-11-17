@@ -4,32 +4,38 @@
 | Tabs: hard tabs (4 spaces visual)
 |
 | 1) Purpose
-|   - Provide “regular” civil time anchors:
-|     day:start, day:midday, day:end
-|     week:start, week:end (ISO week start = Monday)
-|     month:start, month:end
-|     year:start, year:end
+|	- Provide “regular” civil time anchors:
+|	  day:start, day:midday, day:end
+|	  week:start, week:end (ISO week start = Monday)
+|	  month:start, month:end
+|	  year:start, year:end
 |
 | 2) Assumptions
-|   - Uses the active context’s timezone implicitly via Date construction.
-|   - Midday is 12:00 local wall-clock (placeholder; a Solar provider can refine).
-|   - Week starts Monday (ISO). Configurable later.
+|	- Uses the active context’s timezone implicitly via Date construction.
+|	- Midday is 12:00 local wall-clock (placeholder; a Solar provider can refine).
+|	- Week starts Monday (ISO). Configurable later.
 |
 | 3) Output
-|   - Each anchor: { id, label, labelAr, at:Date, frame, category, contextId, source, priority }
-|   - frame: 'daily' (day:*), 'weekly' (week:*), 'monthly' (month:*), 'annual' (year:*).
-|   - category: 'civil'; priority: 0.
+|	- Each anchor: { id, label, labelAr, at:Date, frame, category, contextId, source, priority }
+|	- frame: 'daily' (day:*), 'weekly' (week:*), 'monthly' (month:*), 'annual' (year:*).
+|	- category: 'civil'; priority: 0.
 |
 | 4) Diagnostics
-|   - No console noise except hard failures.
+|	- No console noise except hard failures.
 |
 | ★ Future hooks
-|   - True solar noon via Solar provider.
-|   - Configurable week start (Sunday vs Monday).
+|	- True solar noon via Solar provider.
+|	- Configurable week start (Sunday vs Monday).
+|
+| History
+|	- 2025-11-16: Mark provider readiness via __ChronusCivilProviderReady to support
+|	  loadExternalScriptOnce() callers (e.g., Runway Viewport).
 ==============================================================================*/
 
 (function(){
-	if (!window.Chronus || typeof window.Chronus.registerProvider !== 'function') return;
+	if (!window.Chronus || typeof window.Chronus.registerProvider !== 'function') {
+		return;
+	}
 
 	function atYMD(y,m,d,h=0,mi=0){
 		return new Date(y,m,d,h,mi,0,0);
@@ -109,5 +115,10 @@
 		}
 	};
 
-	try { window.Chronus.registerProvider(PROVIDER); } catch(_){}
+	try {
+		window.Chronus.registerProvider(PROVIDER);
+	} catch(_){}
+
+	// Flag so gadgets (Runway, PrayerTimes, etc.) can await this file via loadExternalScriptOnce().
+	window.__ChronusCivilProviderReady = true;
 })();
