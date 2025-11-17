@@ -1,123 +1,167 @@
 // gadgets/flashcards.js
-(function(){
+(function () {
 	// ===== Manifest (VizInt v1.0) =====
 	const manifest = {
 		_api: "1.0",
 		_class: "FlashCards",
 		_type: "singleton",
 		_id: "Local",
-		_ver: "v0.2.2",
+		_ver: "v0.2.3",
 		label: "Flash Cards",
 		iconEmoji: "🎓",
-		capabilities: ["network"],
+		capabilities: ["network"], // URL fetch (paste works offline)
 		description: "CSV-powered flash cards with sequential or diminishing-random rotation."
 	};
 
-	const info = "CSV → Cards. Diminishing-random or sequential. Auto-advance. Flip or include answers. 🎓";
+	const info =
+		"CSV → Cards. Diminishing-random or sequential. Auto-advance. Flip or include answers. 🎓";
 
 	// ===== Utils =====
 	const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 	const isStr = (v) => typeof v === "string";
-	const stripBOM = (s) => (s && s.charCodeAt(0) === 0xFEFF ? s.slice(1) : s);
+	const stripBOM = (s) => (s && s.charCodeAt(0) === 0xfeff ? s.slice(1) : s);
 
-	function sanitizeHTML(html){
+	function sanitizeHTML(html) {
 		if (!isStr(html) || !html) return "";
 		const temp = document.createElement("div");
 		temp.innerHTML = html;
-		const ALLOWED = new Set(["B","I","EM","STRONG","SMALL","SPAN","SUB","SUP","BR"]);
-		(function walk(node){
-			for (const n of Array.from(node.childNodes)){
-				if (n.nodeType === Node.ELEMENT_NODE){
-					if (!ALLOWED.has(n.tagName)){
+
+		const ALLOWED = new Set(["B", "I", "EM", "STRONG", "SMALL", "SPAN", "SUB", "SUP", "BR"]);
+
+		const walk = (node) => {
+			for (const n of Array.from(node.childNodes)) {
+				if (n.nodeType === Node.ELEMENT_NODE) {
+					if (!ALLOWED.has(n.tagName)) {
 						while (n.firstChild) node.insertBefore(n.firstChild, n);
 						node.removeChild(n);
 						continue;
 					}
-					for (const a of Array.from(n.attributes)) n.removeAttribute(a.name);
+					const atts = Array.from(n.attributes);
+					for (const a of atts) n.removeAttribute(a.name);
 					walk(n);
-				}else if (n.nodeType === Node.COMMENT_NODE){
+				} else if (n.nodeType === Node.COMMENT_NODE) {
 					node.removeChild(n);
 				}
 			}
-		})(temp);
+		};
+		walk(temp);
 		return temp.innerHTML;
 	}
 
-	function detectDelimiter(sampleText){
-		const first = sampleText.split(/\r?\n/).slice(0,5);
-		const count = (re) => first.map(l => (l.match(re)||[]).length).reduce((a,b)=>a+b,0);
-		const C = count(/,/g), S = count(/;/g), T = count(/\t/g);
-		const best = Math.max(C,S,T);
+	// Heuristic delimiter detection: comma, semicolon, or tab
+	function detectDelimiter(sampleText) {
+		const firstLines = sampleText.split(/\r?\n/).slice(0, 5);
+		const count = (re) =>
+			firstLines
+				.map((l) => (l.match(re) || []).length)
+				.reduce((a, b) => a + b, 0);
+		const C = count(/,/g);
+		const S = count(/;/g);
+		const T = count(/\t/g);
+		const best = Math.max(C, S, T);
 		return best === S ? ";" : best === T ? "\t" : ",";
 	}
 
-	function parseCSV(raw){
+	// CSV → { records:[{a,b,notes}], errors, delimiter }
+	function parseCSV(raw) {
 		const text = stripBOM(raw || "");
 		const delim = detectDelimiter(text);
 		const rows = [];
-		let i=0, field="", row=[], inQ=false;
 
-		while (i<text.length){
+		let i = 0;
+		let field = "";
+		let row = [];
+		let inQ = false;
+
+		while (i < text.length) {
 			const ch = text[i];
-			if (inQ){
-				if (ch === '"'){
-					if (text[i+1] === '"'){ field+='"'; i+=2; }
-					else { inQ=false; i++; }
-				}else{ field+=ch; i++; }
-			}else{
-				if (ch === '"'){ inQ=true; i++; }
-				else if (ch === delim){ row.push(field); field=""; i++; }
-				else if (ch === "\r"){ i++; }
-				else if (ch === "\n"){ row.push(field); rows.push(row); row=[]; field=""; i++; }
-				else { field+=ch; i++; }
+			if (inQ) {
+				if (ch === '"') {
+					if (text[i + 1] === '"') {
+						field += '"';
+						i += 2;
+					} else {
+						inQ = false;
+						i++;
+					}
+				} else {
+					field += ch;
+					i++;
+				}
+			} else {
+				if (ch === '"') {
+					inQ = true;
+					i++;
+				} else if (ch === delim) {
+					row.push(field);
+					field = "";
+					i++;
+				} else if (ch === "\r") {
+					i++;
+				} else if (ch === "\n") {
+					row.push(field);
+					rows.push(row);
+					row = [];
+					field = "";
+					i++;
+				} else {
+					field += ch;
+					i++;
+				}
 			}
 		}
-		row.push(field); rows.push(row);
+		row.push(field);
+		rows.push(row);
 
-		// Header-aware (literal):
-		// Treat first row as header ONLY if it contains 'side a' or 'side b' or 'notes' (ci).
+		// Header-aware (literal, conservative)
 		let startIdx = 0;
-		if (rows.length > 1){
-			const hdr = rows[0].map(x => (x||"").trim().toLowerCase());
-			const looks = hdr.includes("side a") || hdr.includes("side b") || hdr.includes("notes");
-			if (looks) startIdx = 1;
+		if (rows.length > 1) {
+			const hdr = rows[0].map((x) => (x || "").trim().toLowerCase());
+			const looksHeader =
+				hdr.includes("side a") || hdr.includes("side b") || hdr.includes("notes");
+			if (looksHeader) startIdx = 1;
 		}
 
-		const out=[], errs=[];
-		for (let r=startIdx; r<rows.length; r++){
+		const records = [];
+		const errors = [];
+
+		for (let r = startIdx; r < rows.length; r++) {
 			const cols = rows[r];
-			if (!cols || cols.length < 2){
+			if (!cols || cols.length < 2) {
 				if (cols && cols.join("").trim().length === 0) continue;
-				errs.push({ row:r+1, reason:"Less than 2 columns" });
+				errors.push({ row: r + 1, reason: "Less than 2 columns" });
 				continue;
 			}
-			const a = sanitizeHTML((cols[0]||"").trim());
-			const b = sanitizeHTML((cols[1]||"").trim());
-			const notes = sanitizeHTML((cols[2]||"").trim());
+			const a = sanitizeHTML((cols[0] || "").trim());
+			const b = sanitizeHTML((cols[1] || "").trim());
+			const notes = sanitizeHTML((cols[2] || "").trim());
 			if (!a && !b) continue;
-			out.push({ a, b, notes });
+			records.push({ a, b, notes });
 		}
-		return { records: out, errors: errs, delimiter: delim };
+
+		return { records, errors, delimiter: delim };
 	}
 
-	function shuffle(arr){
+	function shuffle(arr) {
 		const a = arr.slice();
-		for (let i=a.length-1; i>0; i--){
-			const j = (Math.random()*(i+1))|0;
-			[a[i],a[j]] = [a[j],a[i]];
+		for (let i = a.length - 1; i > 0; i--) {
+			const j = (Math.random() * (i + 1)) | 0;
+			[a[i], a[j]] = [a[j], a[i]];
 		}
 		return a;
 	}
 
-	function fitText(el, minPx, maxPx){
+	function fitText(el, minPx, maxPx) {
 		if (!el) return;
 		const txt = el.textContent || el.innerText || "";
 		const len = Math.max(1, txt.trim().length);
 		const box = el.getBoundingClientRect();
 		if (!box.width || !box.height) return;
-		const base = Math.sqrt((box.width*box.height)/len);
-		const px = Math.max(minPx, Math.min(maxPx, base*0.9));
-		el.style.fontSize = px.toFixed(1)+"px";
+
+		const base = Math.sqrt((box.width * box.height) / len);
+		const px = Math.max(minPx, Math.min(maxPx, base * 0.9));
+
+		el.style.fontSize = px.toFixed(1) + "px";
 		el.style.lineHeight = "1.08";
 		el.style.wordBreak = "break-word";
 		el.style.hyphens = "auto";
@@ -125,45 +169,84 @@
 	}
 
 	// ===== Gadget =====
-	function mount(host, ctx){
-		// Host becomes positioning context for "local modal"
-		host.classList.add("fc-host"); // sets position:relative via CSS below
+	function mount(host, ctx) {
+		// host is our viewport root; we make it positioning context for the local overlay
+		host.classList.add("fc-host");
 
-		// Persisted user intent only (DON'T persist volatile fields)
+		// Persisted (user intent only)
 		const s = ctx.getSettings();
 		const my = s.flashcards || {
 			rawCSV: "",
 			sourceUrl: "",
 			parsed: [],
-			mode: "drand",        // "sequential" | "drand"
+			mode: "drand", // "sequential" | "drand"
 			auto: true,
 			intervalMs: 5000,
-			flipStyle: "reveal",  // "reveal" (Flip to Answers) | "inline" (Include Answers)
+			flipStyle: "reveal", // "reveal" (Flip to Answers) | "inline" (Include Answers)
 			ui: { showConfig: false }
 		};
 
-		// Runtime-only (NOT persisted)
-		my.index   = my.index   || 0;
-		my.pool    = my.pool    || [];
+		// Runtime-only (not meant to be persisted)
+		my.index = my.index || 0;
+		my.pool = my.pool || [];
 		my.history = my.history || [];
+
+		// Diminishing-random cycle state (runtime only – we treat it as session-local)
+		my.cycleOrder = null;
+		my.cyclePos = 0;
+		my.prevCycleOrder = null;
+		my.futureCycleOrder = null;
 
 		// Debounced, non-destructive writer: re-read latest, merge only our subtree
 		let __saveT = null;
-		function cancelPendingSave(){
-			if (__saveT){ clearTimeout(__saveT); __saveT = null; }
+		function cancelPendingSave() {
+			if (__saveT) {
+				clearTimeout(__saveT);
+				__saveT = null;
+			}
 		}
 
-		function save(next){
-			const mergedFlash = { ...(ctx.getSettings().flashcards || {}), ...next };
+		// Persist only stable state (not runtime indexing)
+		function save(patch) {
+			const all = ctx.getSettings();
+			const current = all.flashcards || {};
+
+			const nextPersist = {
+				rawCSV: patch.rawCSV !== undefined ? patch.rawCSV : current.rawCSV || "",
+				sourceUrl: patch.sourceUrl !== undefined ? patch.sourceUrl : current.sourceUrl || "",
+				parsed: patch.parsed !== undefined ? patch.parsed : current.parsed || [],
+				mode: patch.mode !== undefined ? patch.mode : current.mode || "drand",
+				auto:
+					patch.auto !== undefined
+						? !!patch.auto
+						: current.auto !== undefined
+						? !!current.auto
+						: true,
+				intervalMs:
+					patch.intervalMs !== undefined
+						? patch.intervalMs
+						: current.intervalMs || 5000,
+				flipStyle:
+					patternOr(patch.flipStyle, current.flipStyle, "reveal"),
+				ui: patch.ui !== undefined ? patch.ui : current.ui || { showConfig: false }
+			};
+
 			clearTimeout(__saveT);
-			__saveT = setTimeout(()=>{
-				const latestAll = ctx.getSettings();           // re-read
-				ctx.setSettings({ ...latestAll, flashcards: mergedFlash });
+			__saveT = setTimeout(() => {
+				const latestAll = ctx.getSettings();
+				ctx.setSettings({ ...latestAll, flashcards: nextPersist });
 			}, 120);
-			return mergedFlash; // reflect in memory now
+
+			return nextPersist;
 		}
 
-		// ---- DOM ----
+		function patternOr(a, b, fallback) {
+			if (a !== undefined) return a;
+			if (b !== undefined) return b;
+			return fallback;
+		}
+
+		// DOM
 		host.innerHTML = `
 			<div class="fc-wrap">
 				<div class="fc-card">
@@ -250,14 +333,12 @@
 			</div>
 		`;
 
-		// ---- Refs ----
 		const elFront = host.querySelector(".fc-front");
 		const elBack = host.querySelector(".fc-back");
 		const elInline = host.querySelector(".fc-inline");
 		const elStatus = host.querySelector(".fc-status");
 		const elControls = host.querySelector(".fc-controls");
 		const elOverlay = host.querySelector(".fc-overlay");
-		const elCfgPanel = host.querySelector(".fc-cfg-panel");
 
 		const urlIn = host.querySelector("#fc-url");
 		const csvIn = host.querySelector("#fc-csv");
@@ -271,21 +352,14 @@
 		const saveNote = host.querySelector("#fc-save-note");
 		const errOut = host.querySelector("#fc-err");
 
-		// ---- Runtime ----
 		let timer = null;
-		let cdTimer = null;
+		let cdTimer = null; // countdown timer (for auto rem/total s)
 		let nextDueTs = 0;
 		let showingAnswer = false;
 		let ro = null;
 		let painting = false;
 
-		// diminishing-random cycle state (runtime-only; NOT persisted)
-		my.cycleOrder = my.cycleOrder || null;
-		my.cyclePos = my.cyclePos || 0;
-		my.prevCycleOrder = my.prevCycleOrder || null;
-		my.futureCycleOrder = my.futureCycleOrder || null;
-
-		function syncCfgInputs(){
+		function syncCfgInputs() {
 			urlIn.value = my.sourceUrl || "";
 			csvIn.value = my.rawCSV || "";
 			modeIn.value = my.mode;
@@ -294,18 +368,22 @@
 			flipIn.value = my.flipStyle;
 		}
 
-		function wireAutosave(){
+		function wireAutosave() {
 			const saveField = () => {
-				const next = save({ ...my, sourceUrl: urlIn.value.trim(), rawCSV: csvIn.value });
+				const next = save({
+					rawCSV: csvIn.value,
+					sourceUrl: urlIn.value.trim()
+				});
 				Object.assign(my, next);
 				saveNote.textContent = "Autosaved.";
-				setTimeout(()=> saveNote.textContent="", 1000);
+				setTimeout(() => (saveNote.textContent = ""), 1000);
 			};
+
 			urlIn.addEventListener("blur", saveField);
 			csvIn.addEventListener("blur", saveField);
 
 			modeIn.addEventListener("change", () => {
-				const next = save({ ...my, mode: modeIn.value });
+				const next = save({ mode: modeIn.value });
 				Object.assign(my, next);
 				reseedIfNeeded(true);
 				ensureInitialIndex();
@@ -313,64 +391,90 @@
 				render();
 				if (my.auto) restartTimer();
 			});
+
 			autoIn.addEventListener("change", () => {
-				const on = (autoIn.value === "on");
-				const next = save({ ...my, auto: on });
+				const on = autoIn.value === "on";
+				const next = save({ auto: on });
 				Object.assign(my, next);
 				restartTimer();
 				render();
 			});
+
 			intIn.addEventListener("change", () => {
-				const sec = clamp(parseInt(intIn.value,10)||5, 1, 60);
-				const next = save({ ...my, intervalMs: sec*1000 });
+				const sec = clamp(parseInt(intIn.value, 10) || 5, 1, 60);
+				const next = save({ intervalMs: sec * 1000 });
 				Object.assign(my, next);
 				restartTimer();
 				render();
 			});
+
 			flipIn.addEventListener("change", () => {
-				const next = save({ ...my, flipStyle: flipIn.value });
+				const next = save({ flipStyle: flipIn.value });
 				Object.assign(my, next);
 				showingAnswer = false;
 				render();
 			});
 		}
 
-		function toggleConfig(show, { silent = false } = {}){
+		function toggleConfig(show, { silent = false } = {}) {
 			elOverlay.style.display = show ? "block" : "none";
 			elOverlay.classList.toggle("open", !!show);
+
 			const nextState = !!show;
 			const prevState = !!(my.ui && my.ui.showConfig);
-			if (!silent && nextState !== prevState){
-				const next = save({ ...my, ui: { ...(my.ui||{}), showConfig: nextState } });
+
+			if (!silent && nextState !== prevState) {
+				const ui = { ...(my.ui || {}), showConfig: nextState };
+				const next = save({ ui });
+				my.ui = ui;
 				Object.assign(my, next);
 			}
-			if (show) stopTimer(); else restartTimer();
+			if (show) stopTimer();
+			else restartTimer();
 		}
 
-		function buildCycle(){
+		function buildCycle() {
 			const n = my.parsed.length;
 			return shuffle([...Array(n).keys()]);
 		}
 
-		// Ensure we have a current cycle and starting index
-		function ensureInitialIndex(){
-			if (!my.parsed.length || (my.history && my.history.length)) return;
-			if (my.mode === "drand"){
-				if (!Array.isArray(my.cycleOrder) || !my.cycleOrder.length){
-					my.cycleOrder = buildCycle();
-					my.cyclePos = 0;
-				}
-				my.index = my.cycleOrder[my.cyclePos];
+		// Ensures we have a valid starting index:
+		// - In drand: always build a fresh cycle and pick a random first card (per session).
+		// - In sequential: respect existing index if present; otherwise start at 0.
+		function ensureInitialIndex() {
+			const n = my.parsed.length;
+			if (!n) {
+				my.index = 0;
+				my.history = [];
+				my.cycleOrder = null;
+				my.cyclePos = 0;
+				my.prevCycleOrder = null;
+				my.futureCycleOrder = null;
+				return;
+			}
+
+			if (my.mode === "drand") {
+				my.cycleOrder = buildCycle();
+				my.cyclePos = 0;
+				my.index = my.cycleOrder[0];
 				my.history = [my.index];
-			}else{
-				my.index = clamp(my.index || 0, 0, my.parsed.length - 1);
-				my.history = my.parsed.length ? [my.index] : [];
+				my.prevCycleOrder = null;
+				my.futureCycleOrder = null;
+				return;
+			}
+
+			// sequential
+			if (!Array.isArray(my.history) || !my.history.length) {
+				my.index = clamp(my.index || 0, 0, n - 1);
+				my.history = [my.index];
+			} else {
+				my.index = clamp(my.index || 0, 0, n - 1);
 			}
 		}
 
-		function reseedIfNeeded(force=false){
+		function reseedIfNeeded(force = false) {
 			const n = my.parsed.length;
-			if (!n){
+			if (!n) {
 				my.pool = [];
 				my.history = [];
 				my.index = 0;
@@ -380,8 +484,9 @@
 				my.cyclePos = 0;
 				return;
 			}
-			if (my.mode === "drand"){
-				if (force || !Array.isArray(my.cycleOrder) || !my.cycleOrder.length){
+
+			if (my.mode === "drand") {
+				if (force || !Array.isArray(my.cycleOrder) || !my.cycleOrder.length) {
 					my.prevCycleOrder = null;
 					my.futureCycleOrder = null;
 					my.cycleOrder = buildCycle();
@@ -390,11 +495,11 @@
 			}
 		}
 
-		function takeNextIndex(){
+		function takeNextIndex() {
 			const n = my.parsed.length;
 			if (!n) return 0;
 
-			if (my.mode === "sequential"){
+			if (my.mode === "sequential") {
 				const idx = (my.index + 1) % n;
 				my.history.push(idx);
 				my.index = idx;
@@ -402,35 +507,35 @@
 			}
 
 			// drand
-			if (!Array.isArray(my.cycleOrder) || !my.cycleOrder.length){
+			if (!Array.isArray(my.cycleOrder) || !my.cycleOrder.length) {
 				my.cycleOrder = buildCycle();
 				my.cyclePos = 0;
 			}
 
-			// move forward within current cycle, or shift to future/new cycle
-			if (my.cyclePos < my.cycleOrder.length - 1){
+			if (my.cyclePos < my.cycleOrder.length - 1) {
 				my.cyclePos++;
-			}else{
-				if (Array.isArray(my.futureCycleOrder) && my.futureCycleOrder.length){
+			} else {
+				if (Array.isArray(my.futureCycleOrder) && my.futureCycleOrder.length) {
 					my.prevCycleOrder = my.cycleOrder.slice();
 					my.cycleOrder = my.futureCycleOrder.slice();
 					my.futureCycleOrder = null;
 					my.cyclePos = 0;
-				}else{
+				} else {
 					my.prevCycleOrder = my.cycleOrder.slice();
 					my.cycleOrder = buildCycle();
 					my.cyclePos = 0;
 				}
 			}
+
 			const idx = my.cycleOrder[my.cyclePos];
 			my.history.push(idx);
 			my.index = idx;
 			return idx;
 		}
 
-		function takePrevIndex(){
-			// If we're on Side B (reveal), Prev should just show Side A
-			if (my.flipStyle === "reveal" && showingAnswer){
+		function takePrevIndex() {
+			// In reveal mode: first Prev just flips back to Side A of the current card
+			if (my.flipStyle === "reveal" && showingAnswer) {
 				showingAnswer = false;
 				return my.index || 0;
 			}
@@ -438,27 +543,28 @@
 			const n = my.parsed.length;
 			if (!n) return 0;
 
-			if (my.mode === "sequential"){
+			if (my.mode === "sequential") {
 				const idx = Math.max(0, (my.index || 0) - 1);
 				my.index = idx;
 				return idx;
 			}
 
 			// drand
-			if (!Array.isArray(my.cycleOrder) || !my.cycleOrder.length){
+			if (!Array.isArray(my.cycleOrder) || !my.cycleOrder.length) {
 				my.cycleOrder = buildCycle();
 				my.cyclePos = 0;
 			}
 
-			if (my.cyclePos > 0){
+			if (my.cyclePos > 0) {
 				my.cyclePos--;
-			}else if (Array.isArray(my.prevCycleOrder) && my.prevCycleOrder.length){
+			} else if (Array.isArray(my.prevCycleOrder) && my.prevCycleOrder.length) {
+				// Jump back into the previous cycle; remember current as the future path
 				my.futureCycleOrder = my.cycleOrder.slice();
 				my.cycleOrder = my.prevCycleOrder.slice();
 				my.prevCycleOrder = null;
 				my.cyclePos = my.cycleOrder.length - 1;
-			}else{
-				// already at earliest we allow
+			} else {
+				// Already at earliest allowed position
 			}
 
 			const idx = my.cycleOrder[my.cyclePos];
@@ -466,26 +572,28 @@
 			return idx;
 		}
 
-		function renderCard(idx){
+		function renderCard(idx) {
 			const n = my.parsed.length;
-			if (!n){
-				elFront.innerHTML = `<div class="muted">No deck loaded. Click 🎓 (title) or ⚙️ to configure.</div>`;
+			if (!n) {
+				elFront.innerHTML =
+					'<div class="muted">No deck loaded. Click 🎓 (title) or ⚙️ to configure.</div>';
 				elBack.innerHTML = "";
 				elInline.innerHTML = "";
 				return;
 			}
+
 			const rec = my.parsed[idx] || my.parsed[0];
 			const A = rec.a || "";
 			const B = rec.b || "";
 			const N = rec.notes ? rec.notes : "";
 
-			if (my.flipStyle === "inline"){
+			if (my.flipStyle === "inline") {
 				elFront.style.display = "none";
 				elBack.style.display = "none";
 				const noteBlock = N ? `<div class="fc-notes muted">${N}</div>` : "";
 				elInline.style.display = "";
 				elInline.innerHTML = `<div class="fc-q">${A}</div><div class="fc-a">(${B})</div>${noteBlock}`;
-			}else{
+			} else {
 				elInline.style.display = "none";
 				elFront.style.display = showingAnswer ? "none" : "";
 				elBack.style.display = showingAnswer ? "" : "none";
@@ -494,150 +602,178 @@
 				elBack.innerHTML = `<div class="fc-a">${B}</div>${notesLine}`;
 			}
 
-			requestAnimationFrame(()=>{
-				if (my.flipStyle === "inline"){
+			requestAnimationFrame(() => {
+				if (my.flipStyle === "inline") {
 					fitText(elInline.querySelector(".fc-q"), 18, 48);
 					fitText(elInline.querySelector(".fc-a"), 12, 24);
-					const nt = elInline.querySelector(".fc-notes"); if (nt) fitText(nt, 10, 16);
-				}else{
-					if (!showingAnswer) fitText(elFront.querySelector(".fc-q"), 18, 56);
-					else fitText(elBack.querySelector(".fc-a"), 18, 56);
-					const nt = elBack.querySelector(".fc-notes"); if (nt) fitText(nt, 10, 16);
+					const nt = elInline.querySelector(".fc-notes");
+					if (nt) fitText(nt, 10, 16);
+				} else {
+					if (!showingAnswer) {
+						fitText(elFront.querySelector(".fc-q"), 18, 56);
+					} else {
+						fitText(elBack.querySelector(".fc-a"), 18, 56);
+					}
+					const nt = elBack.querySelector(".fc-notes");
+					if (nt) fitText(nt, 10, 16);
 				}
 			});
 		}
 
-		function updateStatus(){
+		function updateStatus() {
 			const n = my.parsed.length;
 			const idx = clamp(my.index || 0, 0, Math.max(0, n - 1));
 			const total = n;
-			const actual = total ? (idx + 1) : 0;
+			const actual = total ? idx + 1 : 0;
 
 			let drandPos = actual;
-			if (my.mode === "drand" && Array.isArray(my.cycleOrder) && my.cycleOrder.length){
-				// position inside current drand cycle is 1-based
-				drandPos = (my.cyclePos + 1);
+			if (my.mode === "drand" && Array.isArray(my.cycleOrder) && my.cycleOrder.length) {
+				drandPos = my.cyclePos + 1;
 			}
 
-			const modeTxt = (my.mode === "drand") ? "drand" : "seq";
+			const modeTxt = my.mode === "drand" ? "drand" : "seq";
 			const totSec = (my.intervalMs || 5000) / 1000;
 			let autoTxt = "manual";
-			if (my.auto){
+
+			if (my.auto) {
 				const rem = Math.max(0, Math.ceil((nextDueTs - Date.now()) / 1000));
-				autoTxt = `auto ${rem}/${totSec|0}s`;
+				autoTxt = `auto ${rem}/${totSec | 0}s`;
 			}
+
 			elStatus.textContent = `[ #${actual}~${drandPos}/${total} ] · ${modeTxt} · ${autoTxt}`;
 		}
 
-		function render(){
-			if (painting) return; painting = true;
+		function render() {
+			if (painting) return;
+			painting = true;
+
 			const n = my.parsed.length;
 			const idx = clamp(my.index || 0, 0, Math.max(0, n - 1));
+
 			updateStatus();
 			renderCard(idx);
+
 			const autoBtn = elControls.querySelector('[data-act="auto"]');
 			autoBtn.textContent = my.auto ? "⏸️" : "▶️";
+
 			painting = false;
 		}
 
-		function stopTimer(){
-			if (timer){ clearInterval(timer); timer = null; }
-			if (cdTimer){ clearInterval(cdTimer); cdTimer = null; }
+		function stopTimer() {
+			if (timer) {
+				clearInterval(timer);
+				timer = null;
+			}
+			if (cdTimer) {
+				clearInterval(cdTimer);
+				cdTimer = null;
+			}
 			nextDueTs = 0;
 			updateStatus();
 		}
-		function restartTimer(){
+
+		function restartTimer() {
 			stopTimer();
 			if (!my.auto || !my.parsed.length || (my.ui && my.ui.showConfig)) return;
+
 			const ivl = my.intervalMs || 5000;
 			nextDueTs = Date.now() + ivl;
 
-			// UI countdown ticker
+			// countdown tick for status line
 			cdTimer = setInterval(updateStatus, 250);
 
-			timer = setInterval(()=>{
-				if (my.flipStyle === "reveal"){
-					if (!showingAnswer){
+			timer = setInterval(() => {
+				if (my.flipStyle === "reveal") {
+					if (!showingAnswer) {
 						showingAnswer = true;
 						render();
-					}else{
+					} else {
 						showingAnswer = false;
 						my.index = takeNextIndex();
 						render();
 					}
-				}else{
+				} else {
 					my.index = takeNextIndex();
 					render();
 				}
-				// schedule next countdown window
 				nextDueTs = Date.now() + ivl;
 				updateStatus();
 			}, ivl);
 		}
 
-		elControls.addEventListener("click", (e)=>{
-			const b = e.target.closest("button[data-act]"); if (!b) return;
+		elControls.addEventListener("click", (e) => {
+			const b = e.target.closest("button[data-act]");
+			if (!b) return;
+
 			const act = b.dataset.act;
 
-			if (act === "prev"){
+			if (act === "prev") {
 				my.index = takePrevIndex();
 				render();
 				if (my.auto) restartTimer();
-			}else if (act === "next"){
+			} else if (act === "next") {
 				showingAnswer = false;
 				my.index = takeNextIndex();
 				render();
 				if (my.auto) restartTimer();
-			}else if (act === "mode"){
-				my.mode = (my.mode === "drand") ? "sequential" : "drand";
-				save({ ...my, mode: my.mode });
+			} else if (act === "mode") {
+				my.mode = my.mode === "drand" ? "sequential" : "drand";
+				save({ mode: my.mode });
 				reseedIfNeeded(true);
 				ensureInitialIndex();
 				showingAnswer = false;
 				render();
 				if (my.auto) restartTimer();
-			}else if (act === "auto"){
+			} else if (act === "auto") {
 				my.auto = !my.auto;
-				save({ ...my, auto: my.auto });
+				save({ auto: my.auto });
 				restartTimer();
 				render();
-			}else if (act === "flip"){
-				if (my.flipStyle === "reveal"){
+			} else if (act === "flip") {
+				if (my.flipStyle === "reveal") {
 					showingAnswer = !showingAnswer;
 					render();
-					if (my.auto) restartTimer();
+					if (my.auto) restartTimer(); // avoid spurious auto flip
 				}
-			}else if (act === "reset") {
+			} else if (act === "reset") {
 				stopTimer();
 				showingAnswer = false;
-				my.auto = false;                       // force manual mode
-				const next = save({ ...my, auto:false });
+				my.auto = false;
+				const next = save({ auto: false });
 				Object.assign(my, next);
 
 				my.index = 0;
 				my.history = my.parsed.length ? [0] : [];
 				my.pool = [];
 				reseedIfNeeded(true);
-				render();                               // ⏸️ shows, timer won’t restart
-				// no restartTimer(); (auto is off now)
-			}else if (act === "config"){
+				ensureInitialIndex();
+				render();
+				// no restartTimer(); auto is now off
+			} else if (act === "config") {
 				toggleConfig(true);
-			}else if (act === "purge") {
+			} else if (act === "purge") {
 				stopTimer();
-				cancelPendingSave(); // <-- prevent a stale deferred write from restoring data
+				cancelPendingSave();
 
-				// Drop our subtree only; do not touch other gadget state
 				const latestAll = ctx.getSettings();
 				const nextAll = { ...latestAll };
-				delete nextAll.flashcards;            // erase context entirely
+				delete nextAll.flashcards;
 				ctx.setSettings(nextAll);
 
-				// Clear runtime + form fields
 				Object.assign(my, {
-					rawCSV:"", sourceUrl:"", parsed:[],
-					mode:"drand", auto:false, intervalMs:5000, flipStyle:"reveal",
-					index:0, pool:[], history:[], ui:{ showConfig:false }
+					rawCSV: "",
+					sourceUrl: "",
+					parsed: [],
+					mode: "drand",
+					auto: false,
+					intervalMs: 5000,
+					flipStyle: "reveal",
+					index: 0,
+					pool: [],
+					history: [],
+					ui: { showConfig: false }
 				});
+
 				urlIn.value = "";
 				csvIn.value = "";
 				modeIn.value = "drand";
@@ -646,66 +782,118 @@
 				flipIn.value = "reveal";
 
 				showingAnswer = false;
-				render(); // reflects ⏸️ and empty deck
-				// no restartTimer(); (auto is off)
+				reseedIfNeeded(true);
+				ensureInitialIndex();
+				render();
 			}
-
 		});
 
-		host.querySelector('[data-cfg="close"]').addEventListener("click", ()=> toggleConfig(false));
-		elOverlay.addEventListener("click", (e)=>{ if (e.target === elOverlay) toggleConfig(false); });
+		host
+			.querySelector('[data-cfg="close"]')
+			.addEventListener("click", () => toggleConfig(false));
+		elOverlay.addEventListener("click", (e) => {
+			if (e.target === elOverlay) toggleConfig(false);
+		});
 
-		loadBtn.addEventListener("click", async ()=>{
-			const url = urlIn.value.trim(); if (!url) return;
-			loadNote.textContent = "Loading…"; errOut.textContent = "";
-			try{
-				const resp = await fetch(url, { cache:"no-store" });
+		loadBtn.addEventListener("click", async () => {
+			const url = urlIn.value.trim();
+			if (!url) return;
+
+			loadNote.textContent = "Loading…";
+			errOut.textContent = "";
+
+			try {
+				const resp = await fetch(url, { cache: "no-store" });
 				if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
 				const txt = await resp.text();
 				csvIn.value = txt;
-				const next = save({ ...my, sourceUrl:url, rawCSV:txt }); Object.assign(my, next);
-				loadNote.textContent = "Loaded. (Remember to Save)"; setTimeout(()=> loadNote.textContent="", 1200);
-			}catch(err){
+
+				const next = save({
+					sourceUrl: url,
+					rawCSV: txt
+				});
+				Object.assign(my, next);
+
+				loadNote.textContent = "Loaded. (Remember to Save)";
+				setTimeout(() => (loadNote.textContent = ""), 1200);
+			} catch (err) {
 				loadNote.textContent = "CORS or fetch error. Please paste CSV instead.";
 				errOut.textContent = String(err && err.message ? err.message : err);
 			}
 		});
 
-		saveBtn.addEventListener("click", ()=>{
+		saveBtn.addEventListener("click", () => {
 			const parsed = parseCSV(csvIn.value || "");
-			my.parsed = parsed.records; my.index=0; my.history = my.parsed.length ? [0] : []; my.pool=[];
+			my.parsed = parsed.records;
+			my.index = 0;
+			my.history = my.parsed.length ? [0] : [];
+			my.pool = [];
+
 			reseedIfNeeded(true);
 			ensureInitialIndex();
-			const next = save({ ...my, rawCSV:(csvIn.value||""), sourceUrl:urlIn.value.trim(), parsed: my.parsed });
+
+			const next = save({
+				rawCSV: csvIn.value || "",
+				sourceUrl: urlIn.value.trim(),
+				parsed: my.parsed
+			});
 			Object.assign(my, next);
-			errOut.textContent = parsed.errors.length
-				? "Imported with some row issues:\n" + parsed.errors.map(e=>`Row ${e.row}: ${e.reason}`).join("\n")
-				: "Imported successfully.";
-			saveNote.textContent = "Saved."; setTimeout(()=> saveNote.textContent="", 1000);
-			toggleConfig(false); showingAnswer=false; render(); restartTimer();
+
+			errOut.textContent =
+				parsed.errors.length > 0
+					? "Imported with some row issues:\n" +
+					  parsed.errors.map((e) => `Row ${e.row}: ${e.reason}`).join("\n")
+					: "Imported successfully.";
+
+			saveNote.textContent = "Saved.";
+			setTimeout(() => (saveNote.textContent = ""), 1000);
+
+			toggleConfig(false);
+			showingAnswer = false;
+			render();
+			restartTimer();
 		});
 
 		// Initial glue
 		syncCfgInputs();
 		wireAutosave();
-		if (my.ui && my.ui.showConfig){ toggleConfig(true, { silent:true }); } // don't write during mount
+		if (my.ui && my.ui.showConfig) {
+			toggleConfig(true, { silent: true }); // don't write during mount
+		}
+
 		reseedIfNeeded(false);
 		ensureInitialIndex();
 		showingAnswer = false;
 		render();
 		restartTimer();
 
-		ro = new ResizeObserver(()=> render()); ro.observe(host);
+		ro = new ResizeObserver(() => render());
+		ro.observe(host);
 
-		return ()=> { stopTimer(); try{ ro && ro.disconnect(); }catch{} };
+		return () => {
+			stopTimer();
+			try {
+				ro && ro.disconnect();
+			} catch (e) {
+				/* ignore */
+			}
+		};
 	}
 
-	// Title-bar info click → same path as ⚙️
-	function onInfoClick(ctx, { slot, body }){
-		const cfgBtn = body && body.querySelector('.fc-controls button[data-act="config"]');
-		if (cfgBtn){ cfgBtn.click(); return; }
-		const overlay = body && body.querySelector('.fc-overlay');
-		if (overlay){ overlay.style.display="block"; overlay.classList.add("open"); }
+	// Titlebar info-click → same path as ⚙
+	function onInfoClick(ctx, { slot, body }) {
+		const cfgBtn =
+			body && body.querySelector('.fc-controls button[data-act="config"]');
+		if (cfgBtn) {
+			cfgBtn.click();
+			return;
+		}
+		const overlay = body && body.querySelector(".fc-overlay");
+		if (overlay) {
+			overlay.style.display = "block";
+			overlay.classList.add("open");
+		}
 	}
 
 	// Expose
