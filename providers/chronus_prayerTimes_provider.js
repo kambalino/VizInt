@@ -80,6 +80,16 @@
 	const Provider = {
 		name: NAME,
 		async provide({ context, frame, cursor }){
+			// --- NEW: guard against missing geo; no lat/lng → no prayer times ---
+			const lat  = context && typeof context.lat  === 'number' ? context.lat  : NaN;
+			const lng  = context && typeof context.lng  === 'number' ? context.lng  : NaN;
+
+			if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+				// Context is not location-ready; don't emit bogus Invalid Date anchors.
+				return [];
+			}
+
+
 			if (frame !== 'daily') return [];
 
 			// Ensure PrayTimes available
