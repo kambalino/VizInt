@@ -1,0 +1,59 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Gadget Portal</title>
+  <link rel="stylesheet" href="./styles/common.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💫</text></svg>">
+</head>
+<body>
+  <div id="dock" class="grid"></div>
+
+  <!-- Classic loader: file:// friendly -->
+
+    <script src="./lib/shared.js"></script>
+	<script src="./lib/history.js"></script>
+	<script src="./lib/registry.js"></script>  <!-- ✅ Added -->
+	<script src="./lib/chronus.js"></script>
+
+<script>
+try {
+  localStorage.removeItem('portalSettings');
+  localStorage.removeItem('vizint.registry');
+  console.log('[VizInt SafeStart] Cleared portalSettings + vizint.registry');
+} catch(e) {
+  console.warn('[VizInt SafeStart] Cleanup failed', e);
+}
+</script>
+
+
+
+	<script src="./lib/loader.js"></script>
+
+
+</body>
+</html>
+<!--
+
+<a href="https://xkcd.com/303/" target="_blank" style="text-decoration:none;">
+  <img src="https://imgs.xkcd.com/comics/compiling.png"
+       alt="xkcd #303 - Compiling"
+       style="width:100%;border-radius:8px;">
+  <div style="text-align:center;font-size:0.8em;margin-top:4px;">
+    xkcd #303 – “Compiling”
+  </div>
+</a>
+
+<a href="https://www.commitstrip.com/en/" target="_blank">
+  <img src="https://www.commitstrip.com/wp-content/uploads/2020/10/Strip-La-demande-650-finalenglish.jpg"
+       alt="CommitStrip" style="width:100%;border-radius:8px;">
+</a>
+
+<a href="https://xkcd.com/" target="_blank" style="text-decoration:none;">
+  <img src="https://imgs.xkcd.com/comics/barrel_cropped_(1).jpg" 
+       alt="xkcd Comic" style="width:100%;border-radius:8px;">
+  <div style="text-align:center;font-size:0.8em;margin-top:4px;">from xkcd.com</div>
+</a>
+
+
+-->
