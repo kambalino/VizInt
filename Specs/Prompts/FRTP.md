@@ -80,6 +80,18 @@ then the recipient MUST:
 
 Processing misrouted messages without confirmation is considered a protocol violation.
 
+### 2.7 Ownership Boundaries & Modification Restrictions
+
+Team members must **not modify assets owned by other subsystems**.
+
+Examples:
+
+* Chronus must not alter Atlas-owned files or logic.
+* Atlas must not modify Chronus time/DST logic.
+* Portal must not change gadget-owned assets except through approved interfaces.
+
+If a request appears to violate ownership boundaries, the recipient MUST raise an exception and request clarification before proceeding.
+
 ---
 
 # 3. FRTP Protocol Structure (Mandatory)
