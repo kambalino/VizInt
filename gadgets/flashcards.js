@@ -6,7 +6,8 @@
 		_class: "FlashCards",
 		_type: "singleton",
 		_id: "Local",
-		_ver: "v0.2.3",
+		_ver: "v0.2.8",
+		verblurb: "auto-reparse on mount; parseCSV instrumentation",
 		label: "Flash Cards",
 		iconEmoji: "🎓",
 		capabilities: ["network"], // URL fetch (paste works offline)
@@ -30,19 +31,19 @@
 
 		const walk = (node) => {
 			for (const n of Array.from(node.childNodes)) {
-				if (n.nodeType === Node.ELEMENT_NODE) {
-					if (!ALLOWED.has(n.tagName)) {
-						while (n.firstChild) node.insertBefore(n.firstChild, n);
-						node.removeChild(n);
-						continue;
-					}
-					const atts = Array.from(n.attributes);
-					for (const a of atts) n.removeAttribute(a.name);
-					walk(n);
-				} else if (n.nodeType === Node.COMMENT_NODE) {
-					node.removeChild(n);
-				}
-			}
+                if (n.nodeType === Node.ELEMENT_NODE) {
+                    if (!ALLOWED.has(n.tagName)) {
+                        while (n.firstChild) node.insertBefore(n.firstChild, n);
+                        node.removeChild(n);
+                        continue;
+                    }
+                    const atts = Array.from(n.attributes);
+                    for (const a of atts) n.removeAttribute(a.name);
+                    walk(n);
+                } else if (n.nodeType === Node.COMMENT_NODE) {
+                    node.removeChild(n);
+                }
+            }
 		};
 		walk(temp);
 		return temp.innerHTML;
@@ -139,6 +140,14 @@
 			records.push({ a, b, notes });
 		}
 
+		console.debug("[Flashcards] parseCSV()", {
+			rawLen: text.length,
+			delimiter: delim,
+			rows: rows.length,
+			outLen: records.length,
+			errs: errors
+		});
+
 		return { records, errors, delimiter: delim };
 	}
 
@@ -172,714 +181,920 @@
 
 	// ===== Gadget =====
 	function mount(host, ctx) {
-		// Persisted (user intent only)
-		const s = ctx.getSettings();
-		const my = s.flashcards || {
-			rawCSV: "",
-			sourceUrl: "",
-			parsed: [],
-			mode: "drand", // "sequential" | "drand"
-			auto: true,
-			intervalMs: 5000,
-			flipStyle: "reveal", // "reveal" (Flip to Answers) | "inline" (Include Answers)
-			ui: { showConfig: false }
-		};
+		console.debug("[Flashcards] mount() ENTER", {
+			hostTag: host && host.tagName,
+			hasCtx: !!ctx,
+			hasGetSettings: !!(ctx && ctx.getSettings),
+			hasSetSettings: !!(ctx && ctx.setSettings)
+		});
 
-		// Runtime-only (not meant to be persisted)
-		my.index = my.index || 0;
-		my.pool = my.pool || [];
-		my.history = my.history || [];
+		/*
+		// --- HARD ABORT SWITCH ---
+		// If things ever go totally sideways (e.g. infinite remount loop),
+		// you can temporarily uncomment this block to completely
+		// short-circuit the gadget and avoid touching ctx at all.
+		// console.warn("[Flashcards] HARD ABORT: short-circuiting mount", {
+		// 	ctx_has_getSettings: !!(ctx && ctx.getSettings),
+		// 	ctx_has_setSettings: !!(ctx && ctx.setSettings)
+		// });
+		// host.innerHTML = "<div class='muted'>Flashcards temporarily disabled (hard abort).</div>";
+		// return;
+		// --- END HARD ABORT SWITCH ---
+		*/
 
-		// Diminishing-random cycle state (runtime only – we treat it as session-local)
-		my.cycleOrder = null;
-		my.cyclePos = 0;
-		my.prevCycleOrder = null;
-		my.futureCycleOrder = null;
+		try {
+			// Persisted (user intent only)
+			const s =
+				(ctx && typeof ctx.getSettings === "function" && ctx.getSettings()) || {};
+			console.debug("[Flashcards] mount() settings snapshot", s);
 
-		// Debounced, non-destructive writer: re-read latest, merge only our subtree
-		let __saveT = null;
-		function cancelPendingSave() {
-			if (__saveT) {
-				clearTimeout(__saveT);
-				__saveT = null;
-			}
-		}
-
-		function patternOr(a, b, fallback) {
-			if (a !== undefined) return a;
-			if (b !== undefined) return b;
-			return fallback;
-		}
-
-		// Persist only stable state (not runtime indexing)
-		function save(patch) {
-			const all = ctx.getSettings();
-			const current = all.flashcards || {};
-
-			const nextPersist = {
-				rawCSV: patch.rawCSV !== undefined ? patch.rawCSV : current.rawCSV || "",
-				sourceUrl: patch.sourceUrl !== undefined ? patch.sourceUrl : current.sourceUrl || "",
-				parsed: patch.parsed !== undefined ? patch.parsed : current.parsed || [],
-				mode: patch.mode !== undefined ? patch.mode : current.mode || "drand",
-				auto:
-					patch.auto !== undefined
-						? !!patch.auto
-						: current.auto !== undefined
-						? !!current.auto
-						: true,
-				intervalMs:
-					patch.intervalMs !== undefined
-						? patch.intervalMs
-						: current.intervalMs || 5000,
-				flipStyle: patternOr(patch.flipStyle, current.flipStyle, "reveal"),
-				ui: patch.ui !== undefined ? patch.ui : current.ui || { showConfig: false }
+			const my = s.flashcards || {
+				rawCSV: "",
+				sourceUrl: "",
+				parsed: [],
+				mode: "drand", // "sequential" | "drand"
+				auto: true,
+				intervalMs: 5000,
+				flipStyle: "reveal", // "reveal" (Flip to Answers) | "inline" (Include Answers)
+				ui: { showConfig: false }
 			};
 
-			clearTimeout(__saveT);
-			__saveT = setTimeout(() => {
-				const latestAll = ctx.getSettings();
-				ctx.setSettings({ ...latestAll, flashcards: nextPersist });
-			}, 120);
+			console.debug("[Flashcards] mount() initial my", {
+				mode: my.mode,
+				auto: my.auto,
+				intervalMs: my.intervalMs,
+				flipStyle: my.flipStyle,
+				ui: my.ui,
+				parsedLen: my.parsed && my.parsed.length
+			});
 
-			return nextPersist;
-		}
-
-		// DOM
-		host.innerHTML = `
-			<div class="fc-wrap">
-				<div class="fc-card">
-					<div class="fc-front" aria-live="polite"></div>
-					<div class="fc-back" aria-live="polite"></div>
-					<div class="fc-inline" aria-live="polite"></div>
-				</div>
-
-				<div class="fc-status muted fineprint"></div>
-				<hr class="fc-hr" />
-				<div class="fc-controls">
-					<button type="button" class="gbtn" data-act="prev"  title="Previous">⏮️</button>
-					<button type="button" class="gbtn" data-act="next"  title="Next">⏭️</button>
-					<button type="button" class="gbtn" data-act="mode"  title="Toggle Mode (Sequential / Diminishing Random)">🔁</button>
-					<button type="button" class="gbtn" data-act="auto"  title="Auto On/Off">▶️</button>
-					<button type="button" class="gbtn" data-act="flip"  title="Flip / Reveal">🔄</button>
-					<button type="button" class="gbtn" data-act="reset" title="Reset Deck">🧹</button>
-					<span class="fc-flex"></span>
-					<button type="button" class="gbtn" data-act="config" title="Settings">⚙️</button>
-					<button type="button" class="gbtn" data-act="purge"  title="Erase Flash Cards data">🗑️</button>
-				</div>
-			</div>
-
-			<div class="fc-config cell3d" style="display:none">
-				<div class="fc-cfg-head">
-					<div class="fc-cfg-title">🎓 Flash Cards — Settings</div>
-					<div class="fc-cfg-actions">
-						<button type="button" class="gbtn" data-cfg="close" title="Close">✕</button>
-					</div>
-				</div>
-				<div class="fc-cfg-body">
-					<div class="field">
-						<label>Deck URL</label>
-						<input type="text" id="fc-url" placeholder="https://example.com/deck.csv" />
-					</div>
-					<div class="field">
-						<button type="button" class="gbtn" id="fc-load">Load from URL</button>
-						<span class="muted fineprint" id="fc-load-note"></span>
-					</div>
-					<div class="field" style="grid-template-columns:1fr;">
-						<label>Paste CSV</label>
-						<textarea id="fc-csv" rows="8" placeholder='"Side A","Side B","Notes"'></textarea>
-					</div>
-
-					<div class="field">
-						<label>Mode</label>
-						<select id="fc-mode">
-							<option value="drand">Diminishing Random</option>
-							<option value="sequential">Sequential</option>
-						</select>
-					</div>
-					<div class="field">
-						<label>Auto</label>
-						<select id="fc-auto">
-							<option value="on">On</option>
-							<option value="off">Off</option>
-						</select>
-					</div>
-					<div class="field">
-						<label>Interval (seconds)</label>
-						<input type="number" id="fc-interval" min="1" max="60" />
-					</div>
-
-					<div class="field">
-						<label>Answer Display</label>
-						<select id="fc-flip">
-							<option value="reveal">Flip to Answers</option>
-							<option value="inline">Include Answers</option>
-						</select>
-					</div>
-
-					<div class="field" style="grid-template-columns:1fr;">
-						<button type="button" class="gbtn" id="fc-save">Save</button>
-						<span id="fc-save-note" class="muted fineprint"></span>
-					</div>
-
-					<div id="fc-err" class="muted" style="white-space:pre-wrap;"></div>
-				</div>
-			</div>
-		`;
-
-		const elFront = host.querySelector(".fc-front");
-		const elBack = host.querySelector(".fc-back");
-		const elInline = host.querySelector(".fc-inline");
-		const elStatus = host.querySelector(".fc-status");
-		const elControls = host.querySelector(".fc-controls");
-		const elConfig = host.querySelector(".fc-config");
-
-		const urlIn = host.querySelector("#fc-url");
-		const csvIn = host.querySelector("#fc-csv");
-		const modeIn = host.querySelector("#fc-mode");
-		const autoIn = host.querySelector("#fc-auto");
-		const intIn = host.querySelector("#fc-interval");
-		const flipIn = host.querySelector("#fc-flip");
-		const loadBtn = host.querySelector("#fc-load");
-		const loadNote = host.querySelector("#fc-load-note");
-		const saveBtn = host.querySelector("#fc-save");
-		const saveNote = host.querySelector("#fc-save-note");
-		const errOut = host.querySelector("#fc-err");
-
-		let timer = null;
-		let cdTimer = null; // countdown timer (for auto rem/total s)
-		let nextDueTs = 0;
-		let showingAnswer = false;
-		let ro = null;
-		let painting = false;
-
-		function syncCfgInputs() {
-			urlIn.value = my.sourceUrl || "";
-			csvIn.value = my.rawCSV || "";
-			modeIn.value = my.mode;
-			autoIn.value = my.auto ? "on" : "off";
-			intIn.value = Math.round((my.intervalMs || 5000) / 1000);
-			flipIn.value = my.flipStyle;
-		}
-
-		function wireAutosave() {
-			const saveField = () => {
-				const next = save({
-					rawCSV: csvIn.value,
-					sourceUrl: urlIn.value.trim()
+			// If we have rawCSV but parsed is empty, reparse at runtime (no ctx writes here)
+			if (
+				typeof my.rawCSV === "string" &&
+				my.rawCSV.trim() &&
+				(!Array.isArray(my.parsed) || !my.parsed.length)
+			) {
+				console.debug(
+					"[Flashcards] mount() reparsing rawCSV because parsed is empty"
+				);
+				const parsed = parseCSV(my.rawCSV);
+				console.debug("[Flashcards] mount() reparsed snapshot", {
+					records: parsed.records.length,
+					errors: parsed.errors
 				});
-				Object.assign(my, next);
-				saveNote.textContent = "Autosaved.";
-				setTimeout(() => (saveNote.textContent = ""), 1000);
-			};
-
-			urlIn.addEventListener("blur", saveField);
-			csvIn.addEventListener("blur", saveField);
-
-			modeIn.addEventListener("change", () => {
-				const next = save({ mode: modeIn.value });
-				Object.assign(my, next);
-				reseedIfNeeded(true);
-				ensureInitialIndex();
-				showingAnswer = false;
-				render();
-				if (my.auto) restartTimer();
-			});
-
-			autoIn.addEventListener("change", () => {
-				const on = autoIn.value === "on";
-				const next = save({ auto: on });
-				Object.assign(my, next);
-				restartTimer();
-				render();
-			});
-
-			intIn.addEventListener("change", () => {
-				const sec = clamp(parseInt(intIn.value, 10) || 5, 1, 60);
-				const next = save({ intervalMs: sec * 1000 });
-				Object.assign(my, next);
-				restartTimer();
-				render();
-			});
-
-			flipIn.addEventListener("change", () => {
-				const next = save({ flipStyle: flipIn.value });
-				Object.assign(my, next);
-				showingAnswer = false;
-				render();
-			});
-		}
-
-		function toggleConfig(show) {
-			elConfig.style.display = show ? "" : "none";
-			const ui = { ...(my.ui || {}), showConfig: !!show };
-			const next = save({ ui });
-			my.ui = ui;
-			Object.assign(my, next);
-
-			if (show) stopTimer();
-			else restartTimer();
-		}
-
-		function buildCycle() {
-			const n = my.parsed.length;
-			return shuffle([...Array(n).keys()]);
-		}
-
-		// Ensures we have a valid starting index:
-		// - In drand: always build a fresh cycle and pick a random first card (per session).
-		// - In sequential: respect existing index if present; otherwise start at 0.
-		function ensureInitialIndex() {
-			const n = my.parsed.length;
-			if (!n) {
-				my.index = 0;
-				my.history = [];
-				my.cycleOrder = null;
-				my.cyclePos = 0;
-				my.prevCycleOrder = null;
-				my.futureCycleOrder = null;
-				return;
+				my.parsed = parsed.records;
 			}
 
-			if (my.mode === "drand") {
-				my.cycleOrder = buildCycle();
-				my.cyclePos = 0;
-				my.index = my.cycleOrder[0];
-				my.history = [my.index];
-				my.prevCycleOrder = null;
-				my.futureCycleOrder = null;
-				return;
+			// Runtime-only (not meant to be persisted)
+			my.index = my.index || 0;
+			my.pool = my.pool || [];
+			my.history = my.history || [];
+
+			// Diminishing-random cycle state (runtime only – we treat it as session-local)
+			my.cycleOrder = null;
+			my.cyclePos = 0;
+			my.prevCycleOrder = null;
+			my.futureCycleOrder = null;
+
+			// Debounced, non-destructive writer: re-read latest, merge only our subtree
+			let __saveT = null;
+			function cancelPendingSave() {
+				if (__saveT) {
+					clearTimeout(__saveT);
+					__saveT = null;
+				}
 			}
 
-			// sequential
-			if (!Array.isArray(my.history) || !my.history.length) {
-				my.index = clamp(my.index || 0, 0, n - 1);
-				my.history = [my.index];
-			} else {
-				my.index = clamp(my.index || 0, 0, n - 1);
-			}
-		}
-
-		function reseedIfNeeded(force = false) {
-			const n = my.parsed.length;
-			if (!n) {
-				my.pool = [];
-				my.history = [];
-				my.index = 0;
-				my.cycleOrder = null;
-				my.prevCycleOrder = null;
-				my.futureCycleOrder = null;
-				my.cyclePos = 0;
-				return;
+			function patternOr(a, b, fallback) {
+				if (a !== undefined) return a;
+				if (b !== undefined) return b;
+				return fallback;
 			}
 
-			if (my.mode === "drand") {
-				if (force || !Array.isArray(my.cycleOrder) || !my.cycleOrder.length) {
+			// Persist only stable state (not runtime indexing)
+			function save(patch) {
+				console.debug("[Flashcards] save() called", patch);
+
+				const all =
+					(ctx && typeof ctx.getSettings === "function" && ctx.getSettings()) || {};
+				const current = all.flashcards || {};
+
+				const nextPersist = {
+					rawCSV: patch.rawCSV !== undefined ? patch.rawCSV : current.rawCSV || "",
+					sourceUrl:
+						patch.sourceUrl !== undefined ? patch.sourceUrl : current.sourceUrl || "",
+					parsed: patch.parsed !== undefined ? patch.parsed : current.parsed || [],
+					mode: patch.mode !== undefined ? patch.mode : current.mode || "drand",
+					auto:
+						patch.auto !== undefined
+							? !!patch.auto
+							: current.auto !== undefined
+							? !!current.auto
+							: true,
+					intervalMs:
+						patch.intervalMs !== undefined
+							? patch.intervalMs
+							: current.intervalMs || 5000,
+					flipStyle: patternOr(patch.flipStyle, current.flipStyle, "reveal"),
+					ui: patch.ui !== undefined ? patch.ui : current.ui || { showConfig: false }
+				};
+
+				console.debug("[Flashcards] save() nextPersist", {
+					...nextPersist,
+					parsedLen: Array.isArray(nextPersist.parsed)
+						? nextPersist.parsed.length
+						: "n/a"
+				});
+
+				clearTimeout(__saveT);
+
+				if (!ctx || typeof ctx.setSettings !== "function") {
+					console.warn("[Flashcards] save() abort: ctx.setSettings missing", {
+						hasCtx: !!ctx
+					});
+					return nextPersist;
+				}
+
+				__saveT = setTimeout(() => {
+					try {
+						const latestAll =
+							(ctx &&
+								typeof ctx.getSettings === "function" &&
+								ctx.getSettings()) || {};
+						const merged = { ...latestAll, flashcards: nextPersist };
+						console.debug("[Flashcards] save() writing settings", {
+							keys: Object.keys(merged.flashcards || {}),
+							parsedLen: Array.isArray(
+								merged.flashcards && merged.flashcards.parsed
+							)
+								? merged.flashcards.parsed.length
+								: "n/a"
+						});
+						ctx.setSettings(merged);
+					} catch (err) {
+						console.error("[Flashcards] save() writing FAILED", err);
+					}
+				}, 120);
+
+				return nextPersist;
+			}
+
+			// DOM
+			host.innerHTML = `
+				<div class="fc-wrap">
+					<div class="fc-card">
+						<div class="fc-front" aria-live="polite"></div>
+						<div class="fc-back" aria-live="polite"></div>
+						<div class="fc-inline" aria-live="polite"></div>
+					</div>
+
+					<div class="fc-status muted fineprint"></div>
+					<hr class="fc-hr" />
+					<div class="fc-controls">
+						<button type="button" class="gbtn" data-fc="prev"  title="Previous">⏮️</button>
+						<button type="button" class="gbtn" data-fc="next"  title="Next">⏭️</button>
+						<button type="button" class="gbtn" data-fc="mode"  title="Toggle Mode (Sequential / Diminishing Random)">🔁</button>
+						<button type="button" class="gbtn" data-fc="auto"  title="Auto On/Off">▶️</button>
+						<button type="button" class="gbtn" data-fc="flip"  title="Flip / Reveal">🔄</button>
+						<button type="button" class="gbtn" data-fc="reset" title="Reset Deck">🧹</button>
+						<span class="fc-flex"></span>
+						<button type="button" class="gbtn" data-fc="config" title="Settings">⚙️</button>
+						<button type="button" class="gbtn" data-fc="purge"  title="Erase Flash Cards data">🗑️</button>
+					</div>
+				</div>
+
+				<div class="fc-config cell3d" style="display:none">
+					<div class="fc-cfg-head">
+						<div class="fc-cfg-title">🎓 Flash Cards — Settings</div>
+						<div class="fc-cfg-actions">
+							<button type="button" class="gbtn" data-cfg="close" title="Close">✕</button>
+						</div>
+					</div>
+					<div class="fc-cfg-body">
+						<div class="field">
+							<label for="fc-url">Deck URL</label>
+							<input type="text" id="fc-url" name="fc-url" placeholder="https://example.com/deck.csv" />
+						</div>
+						<div class="field">
+							<button type="button" class="gbtn" id="fc-load">Load from URL</button>
+							<span class="muted fineprint" id="fc-load-note"></span>
+						</div>
+						<div class="field" style="grid-template-columns:1fr;">
+							<label for="fc-csv">Paste CSV</label>
+							<textarea id="fc-csv" name="fc-csv" rows="8" placeholder='"Side A","Side B","Notes"'></textarea>
+						</div>
+
+						<div class="field">
+							<label for="fc-mode">Mode</label>
+							<select id="fc-mode" name="fc-mode">
+								<option value="drand">Diminishing Random</option>
+								<option value="sequential">Sequential</option>
+							</select>
+						</div>
+						<div class="field">
+							<label for="fc-auto">Auto</label>
+							<select id="fc-auto" name="fc-auto">
+								<option value="on">On</option>
+								<option value="off">Off</option>
+							</select>
+						</div>
+						<div class="field">
+							<label for="fc-interval">Interval (seconds)</label>
+							<input type="number" id="fc-interval" name="fc-interval" min="1" max="60" />
+						</div>
+
+						<div class="field">
+							<label for="fc-flip">Answer Display</label>
+							<select id="fc-flip" name="fc-flip">
+								<option value="reveal">Flip to Answers</option>
+								<option value="inline">Include Answers</option>
+							</select>
+						</div>
+
+						<div class="field" style="grid-template-columns:1fr;">
+							<button type="button" class="gbtn" id="fc-save">Save</button>
+							<span id="fc-save-note" class="muted fineprint"></span>
+						</div>
+
+						<div id="fc-err" class="muted" style="white-space:pre-wrap;"></div>
+					</div>
+				</div>
+			`;
+
+			const elFront = host.querySelector(".fc-front");
+			const elBack = host.querySelector(".fc-back");
+			const elInline = host.querySelector(".fc-inline");
+			const elStatus = host.querySelector(".fc-status");
+			const elControls = host.querySelector(".fc-controls");
+			const elConfig = host.querySelector(".fc-config");
+
+			const urlIn = host.querySelector("#fc-url");
+			const csvIn = host.querySelector("#fc-csv");
+			const modeIn = host.querySelector("#fc-mode");
+			const autoIn = host.querySelector("#fc-auto");
+			const intIn = host.querySelector("#fc-interval");
+			const flipIn = host.querySelector("#fc-flip");
+			const loadBtn = host.querySelector("#fc-load");
+			const loadNote = host.querySelector("#fc-load-note");
+			const saveBtn = host.querySelector("#fc-save");
+			const saveNote = host.querySelector("#fc-save-note");
+			const errOut = host.querySelector("#fc-err");
+
+			let timer = null;
+			let cdTimer = null; // countdown timer (for auto rem/total s)
+			let nextDueTs = 0;
+			let showingAnswer = false;
+			let ro = null;
+			let painting = false;
+
+			function syncCfgInputs() {
+				urlIn.value = my.sourceUrl || "";
+				csvIn.value = my.rawCSV || "";
+				modeIn.value = my.mode;
+				autoIn.value = my.auto ? "on" : "off";
+				intIn.value = Math.round((my.intervalMs || 5000) / 1000);
+				flipIn.value = my.flipStyle;
+				console.debug("[Flashcards] syncCfgInputs()", {
+					mode: my.mode,
+					auto: my.auto,
+					intervalMs: my.intervalMs,
+					flipStyle: my.flipStyle
+				});
+			}
+
+			function wireAutosave(){
+				const saveField = () => {
+					console.debug("[Flashcards] AUTOSAVE blur");
+					const next = save({
+						...my,
+						sourceUrl: urlIn.value.trim(),
+						rawCSV: csvIn.value
+					});
+					Object.assign(my, next);
+					saveNote.textContent = "Autosaved.";
+					setTimeout(()=> saveNote.textContent="", 1000);
+				};
+				urlIn.addEventListener("blur", saveField);
+				csvIn.addEventListener("blur", saveField);
+
+				modeIn.addEventListener("change", () => {
+					console.debug("[Flashcards] modeIn change", { value: modeIn.value });
+					const next = save({ mode: modeIn.value });
+					Object.assign(my, next);
+					reseedIfNeeded(true);
+					ensureInitialIndex();
+					showingAnswer = false;
+					render();
+					if (my.auto) restartTimer();
+				});
+
+				autoIn.addEventListener("change", () => {
+					const on = autoIn.value === "on";
+					console.debug("[Flashcards] autoIn change", { on });
+					const next = save({ auto: on });
+					Object.assign(my, next);
+					restartTimer();
+					render();
+				});
+
+				intIn.addEventListener("change", () => {
+					const sec = clamp(parseInt(intIn.value, 10) || 5, 1, 60);
+					console.debug("[Flashcards] interval change", { sec });
+					const next = save({ intervalMs: sec * 1000 });
+					Object.assign(my, next);
+					restartTimer();
+					render();
+				});
+
+				flipIn.addEventListener("change", () => {
+					console.debug("[Flashcards] flipIn change", { flipStyle: flipIn.value });
+					const next = save({ flipStyle: flipIn.value });
+					Object.assign(my, next);
+					showingAnswer = false;
+					render();
+				});
+			}
+
+			function toggleConfig(show) {
+				console.debug("[Flashcards] toggleConfig()", { show });
+				elConfig.style.display = show ? "" : "none";
+				const ui = { ...(my.ui || {}), showConfig: !!show };
+				const next = save({ ui });
+				my.ui = ui;
+				Object.assign(my, next);
+
+				if (show) stopTimer();
+				else restartTimer();
+			}
+
+			function buildCycle() {
+				const n = my.parsed.length;
+				const cycle = shuffle([...Array(n).keys()]);
+				console.debug("[Flashcards] buildCycle()", { n, cycle });
+				return cycle;
+			}
+
+			function ensureInitialIndex() {
+				const n = my.parsed.length;
+				console.debug("[Flashcards] ensureInitialIndex()", {
+					n,
+					mode: my.mode,
+					historyLen: my.history.length
+				});
+				if (!n) {
+					my.index = 0;
+					my.history = [];
+					my.cycleOrder = null;
+					my.cyclePos = 0;
 					my.prevCycleOrder = null;
 					my.futureCycleOrder = null;
+					return;
+				}
+
+				if (my.mode === "drand") {
 					my.cycleOrder = buildCycle();
 					my.cyclePos = 0;
+					my.index = my.cycleOrder[0];
+					my.history = [my.index];
+					my.prevCycleOrder = null;
+					my.futureCycleOrder = null;
+					console.debug("[Flashcards] ensureInitialIndex() drand start", {
+						index: my.index,
+						cycleOrder: my.cycleOrder
+					});
+					return;
 				}
-			}
-		}
 
-		function takeNextIndex() {
-			const n = my.parsed.length;
-			if (!n) return 0;
-
-			if (my.mode === "sequential") {
-				const idx = (my.index + 1) % n;
-				my.history.push(idx);
-				my.index = idx;
-				return idx;
-			}
-
-			// drand
-			if (!Array.isArray(my.cycleOrder) || !my.cycleOrder.length) {
-				my.cycleOrder = buildCycle();
-				my.cyclePos = 0;
+				// sequential
+				if (!Array.isArray(my.history) || !my.history.length) {
+					my.index = clamp(my.index || 0, 0, n - 1);
+					my.history = [my.index];
+				} else {
+					my.index = clamp(my.index || 0, 0, n - 1);
+				}
+				console.debug("[Flashcards] ensureInitialIndex() seq start", {
+					index: my.index,
+					history: my.history
+				});
 			}
 
-			if (my.cyclePos < my.cycleOrder.length - 1) {
-				my.cyclePos++;
-			} else {
-				if (Array.isArray(my.futureCycleOrder) && my.futureCycleOrder.length) {
-					my.prevCycleOrder = my.cycleOrder.slice();
-					my.cycleOrder = my.futureCycleOrder.slice();
+			function reseedIfNeeded(force = false) {
+				const n = my.parsed.length;
+				console.debug("[Flashcards] reseedIfNeeded()", {
+					force,
+					n,
+					mode: my.mode,
+					hasCycleOrder: !!(my.cycleOrder && my.cycleOrder.length)
+				});
+				if (!n) {
+					my.pool = [];
+					my.history = [];
+					my.index = 0;
+					my.cycleOrder = null;
+					my.prevCycleOrder = null;
 					my.futureCycleOrder = null;
 					my.cyclePos = 0;
-				} else {
-					my.prevCycleOrder = my.cycleOrder.slice();
+					return;
+				}
+
+				if (my.mode === "drand") {
+					if (force || !Array.isArray(my.cycleOrder) || !my.cycleOrder.length) {
+						my.prevCycleOrder = null;
+						my.futureCycleOrder = null;
+						my.cycleOrder = buildCycle();
+						my.cyclePos = 0;
+					}
+				}
+			}
+
+			function takeNextIndex() {
+				const n = my.parsed.length;
+				if (!n) return 0;
+
+				if (my.mode === "sequential") {
+					const idx = (my.index + 1) % n;
+					my.history.push(idx);
+					my.index = idx;
+					console.debug("[Flashcards] takeNextIndex() seq", {
+						idx,
+						historyLen: my.history.length
+					});
+					return idx;
+				}
+
+				// drand
+				if (!Array.isArray(my.cycleOrder) || !my.cycleOrder.length) {
 					my.cycleOrder = buildCycle();
 					my.cyclePos = 0;
 				}
-			}
 
-			const idx = my.cycleOrder[my.cyclePos];
-			my.history.push(idx);
-			my.index = idx;
-			return idx;
-		}
+				if (my.cyclePos < my.cycleOrder.length - 1) {
+					my.cyclePos++;
+				} else {
+					if (Array.isArray(my.futureCycleOrder) && my.futureCycleOrder.length) {
+						my.prevCycleOrder = my.cycleOrder.slice();
+						my.cycleOrder = my.futureCycleOrder.slice();
+						my.futureCycleOrder = null;
+						my.cyclePos = 0;
+					} else {
+						my.prevCycleOrder = my.cycleOrder.slice();
+						my.cycleOrder = buildCycle();
+						my.cyclePos = 0;
+					}
+				}
 
-		function takePrevIndex() {
-			// In reveal mode: first Prev just flips back to Side A of the current card
-			if (my.flipStyle === "reveal" && showingAnswer) {
-				showingAnswer = false;
-				return my.index || 0;
-			}
-
-			const n = my.parsed.length;
-			if (!n) return 0;
-
-			if (my.mode === "sequential") {
-				const idx = Math.max(0, (my.index || 0) - 1);
+				const idx = my.cycleOrder[my.cyclePos];
+				my.history.push(idx);
 				my.index = idx;
+				console.debug("[Flashcards] takeNextIndex() drand", {
+					idx,
+					cyclePos: my.cyclePos,
+					cycleOrder: my.cycleOrder
+				});
 				return idx;
 			}
 
-			// drand
-			if (!Array.isArray(my.cycleOrder) || !my.cycleOrder.length) {
-				my.cycleOrder = buildCycle();
-				my.cyclePos = 0;
-			}
-
-			if (my.cyclePos > 0) {
-				my.cyclePos--;
-			} else if (Array.isArray(my.prevCycleOrder) && my.prevCycleOrder.length) {
-				// Jump back into the previous cycle; remember current as the future path
-				my.futureCycleOrder = my.cycleOrder.slice();
-				my.cycleOrder = my.prevCycleOrder.slice();
-				my.prevCycleOrder = null;
-				my.cyclePos = my.cycleOrder.length - 1;
-			} else {
-				// Already at earliest allowed position
-			}
-
-			const idx = my.cycleOrder[my.cyclePos];
-			my.index = idx;
-			return idx;
-		}
-
-		function renderCard(idx) {
-			const n = my.parsed.length;
-			if (!n) {
-				elFront.innerHTML =
-					'<div class="muted">No deck loaded. Click 🎓 (title) or ⚙️ to configure.</div>';
-				elBack.innerHTML = "";
-				elInline.innerHTML = "";
-				return;
-			}
-
-			const rec = my.parsed[idx] || my.parsed[0];
-			const A = rec.a || "";
-			const B = rec.b || "";
-			const N = rec.notes ? rec.notes : "";
-
-			if (my.flipStyle === "inline") {
-				elFront.style.display = "none";
-				elBack.style.display = "none";
-				const noteBlock = N ? `<div class="fc-notes muted">${N}</div>` : "";
-				elInline.style.display = "";
-				elInline.innerHTML = `<div class="fc-q">${A}</div><div class="fc-a">(${B})</div>${noteBlock}`;
-			} else {
-				elInline.style.display = "none";
-				elFront.style.display = showingAnswer ? "none" : "";
-				elBack.style.display = showingAnswer ? "" : "none";
-				elFront.innerHTML = `<div class="fc-q">${A}</div>`;
-				const notesLine = N ? `<div class="fc-notes muted">${N}</div>` : "";
-				elBack.innerHTML = `<div class="fc-a">${B}</div>${notesLine}`;
-			}
-
-			requestAnimationFrame(() => {
-				if (my.flipStyle === "inline") {
-					fitText(elInline.querySelector(".fc-q"), 24, 110);
-					fitText(elInline.querySelector(".fc-a"), 20, 96);
-					const nt = elInline.querySelector(".fc-notes");
-					if (nt) fitText(nt, 12, 28);
-				} else {
-					if (!showingAnswer) {
-						fitText(elFront.querySelector(".fc-q"), 24, 110);
-					} else {
-						fitText(elBack.querySelector(".fc-a"), 24, 96);
-					}
-					const nt = elBack.querySelector(".fc-notes");
-					if (nt) fitText(nt, 12, 28);
+			function takePrevIndex() {
+				if (my.flipStyle === "reveal" && showingAnswer) {
+					showingAnswer = false;
+					console.debug("[Flashcards] takePrevIndex() flip back to question", {
+						index: my.index
+					});
+					return my.index || 0;
 				}
-			});
-		}
 
-		function updateStatus() {
-			const n = my.parsed.length;
-			const idx = clamp(my.index || 0, 0, Math.max(0, n - 1));
-			const total = n;
-			const actual = total ? idx + 1 : 0;
+				const n = my.parsed.length;
+				if (!n) return 0;
 
-			let drandPos = actual;
-			if (my.mode === "drand" && Array.isArray(my.cycleOrder) && my.cycleOrder.length) {
-				drandPos = my.cyclePos + 1;
+				if (my.mode === "sequential") {
+					const idx = Math.max(0, (my.index || 0) - 1);
+					my.index = idx;
+					console.debug("[Flashcards] takePrevIndex() seq", { idx });
+					return idx;
+				}
+
+				// drand
+				if (!Array.isArray(my.cycleOrder) || !my.cycleOrder.length) {
+					my.cycleOrder = buildCycle();
+					my.cyclePos = 0;
+				}
+
+				if (my.cyclePos > 0) {
+					my.cyclePos--;
+				} else if (Array.isArray(my.prevCycleOrder) && my.prevCycleOrder.length) {
+					my.futureCycleOrder = my.cycleOrder.slice();
+					my.cycleOrder = my.prevCycleOrder.slice();
+					my.prevCycleOrder = null;
+					my.cyclePos = my.cycleOrder.length - 1;
+				} else {
+					// Already at earliest allowed position
+				}
+
+				const idx = my.cycleOrder[my.cyclePos];
+				my.index = idx;
+				console.debug("[Flashcards] takePrevIndex() drand", {
+					idx,
+					cyclePos: my.cyclePos,
+					cycleOrder: my.cycleOrder
+				});
+				return idx;
 			}
 
-			const modeTxt = my.mode === "drand" ? "drand" : "seq";
-			const totSec = (my.intervalMs || 5000) / 1000;
-			let autoTxt = "manual";
+			function renderCard(idx) {
+				const n = my.parsed.length;
+				if (!n) {
+					elFront.innerHTML =
+						'<div class="muted">No deck loaded. Click 🎓 (title) or ⚙️ to configure.</div>';
+					elBack.innerHTML = "";
+					elInline.innerHTML = "";
+					return;
+				}
 
-			if (my.auto) {
-				const rem = Math.max(0, Math.ceil((nextDueTs - Date.now()) / 1000));
-				autoTxt = `auto ${rem}/${totSec | 0}s`;
-			}
+				const rec = my.parsed[idx] || my.parsed[0];
+				const A = rec.a || "";
+				const B = rec.b || "";
+				const N = rec.notes ? rec.notes : "";
 
-			elStatus.textContent = `[ #${actual}~${drandPos}/${total} ] · ${modeTxt} · ${autoTxt}`;
-		}
+				console.debug("[Flashcards] renderCard()", {
+					idx,
+					A,
+					B,
+					notes: N,
+					flipStyle: my.flipStyle,
+					showingAnswer
+				});
 
-		function render() {
-			if (painting) return;
-			painting = true;
+				if (my.flipStyle === "inline") {
+					elFront.style.display = "none";
+					elBack.style.display = "none";
+					const noteBlock = N ? `<div class="fc-notes muted">${N}</div>` : "";
+					elInline.style.display = "";
+					elInline.innerHTML = `<div class="fc-q">${A}</div><div class="fc-a">(${B})</div>${noteBlock}`;
+				} else {
+					elInline.style.display = "none";
+					elFront.style.display = showingAnswer ? "none" : "";
+					elBack.style.display = showingAnswer ? "" : "none";
+					elFront.innerHTML = `<div class="fc-q">${A}</div>`;
+					const notesLine = N ? `<div class="fc-notes muted">${N}</div>` : "";
+					elBack.innerHTML = `<div class="fc-a">${B}</div>${notesLine}`;
+				}
 
-			const n = my.parsed.length;
-			const idx = clamp(my.index || 0, 0, Math.max(0, n - 1));
-
-			updateStatus();
-			renderCard(idx);
-
-			const autoBtn = elControls.querySelector('[data-act="auto"]');
-			autoBtn.textContent = my.auto ? "⏸️" : "▶️";
-
-			painting = false;
-		}
-
-		function stopTimer() {
-			if (timer) {
-				clearInterval(timer);
-				timer = null;
-			}
-			if (cdTimer) {
-				clearInterval(cdTimer);
-				cdTimer = null;
-			}
-			nextDueTs = 0;
-			updateStatus();
-		}
-
-		function restartTimer() {
-			stopTimer();
-			if (!my.auto || !my.parsed.length || (my.ui && my.ui.showConfig)) return;
-
-			const ivl = my.intervalMs || 5000;
-			nextDueTs = Date.now() + ivl;
-
-			// countdown tick for status line
-			cdTimer = setInterval(updateStatus, 250);
-
-			timer = setInterval(() => {
-				if (my.flipStyle === "reveal") {
-					if (!showingAnswer) {
-						showingAnswer = true;
-						render();
+				requestAnimationFrame(() => {
+					if (my.flipStyle === "inline") {
+						fitText(elInline.querySelector(".fc-q"), 32, 140);
+						fitText(elInline.querySelector(".fc-a"), 24, 96);
+						const nt = elInline.querySelector(".fc-notes");
+						if (nt) fitText(nt, 12, 28);
 					} else {
-						showingAnswer = false;
+						if (!showingAnswer) {
+							fitText(elFront.querySelector(".fc-q"), 32, 140);
+						} else {
+							fitText(elBack.querySelector(".fc-a"), 24, 96);
+						}
+						const nt = elBack.querySelector(".fc-notes");
+						if (nt) fitText(nt, 12, 28);
+					}
+				});
+			}
+
+			function updateStatus() {
+				const n = my.parsed.length;
+				const idx = clamp(my.index || 0, 0, Math.max(0, n - 1));
+				const total = n;
+				const actual = total ? idx + 1 : 0;
+
+				let drandPos = actual;
+				if (my.mode === "drand" && Array.isArray(my.cycleOrder) && my.cycleOrder.length) {
+					drandPos = my.cyclePos + 1;
+				}
+
+				const modeTxt = my.mode === "drand" ? "drand" : "seq";
+				const totSec = (my.intervalMs || 5000) / 1000;
+				let autoTxt = "manual";
+
+				if (my.auto) {
+					const rem = Math.max(0, Math.ceil((nextDueTs - Date.now()) / 1000));
+					autoTxt = `auto ${rem}/${totSec | 0}s`;
+				}
+
+				elStatus.textContent = `[ #${actual}~${drandPos}/${total} ] · ${modeTxt} · ${autoTxt}`;
+			}
+
+			function render() {
+				if (painting) return;
+				painting = true;
+
+				const n = my.parsed.length;
+				const idx = clamp(my.index || 0, 0, Math.max(0, n - 1));
+				console.debug("[Flashcards] render()", {
+					n,
+					idx,
+					mode: my.mode,
+					auto: my.auto,
+					flipStyle: my.flipStyle,
+					showingAnswer
+				});
+
+				updateStatus();
+				renderCard(idx);
+
+				const autoBtn = elControls.querySelector('[data-fc="auto"]');
+				autoBtn.textContent = my.auto ? "⏸️" : "▶️";
+
+				painting = false;
+			}
+
+			function stopTimer() {
+				console.debug("[Flashcards] stopTimer()");
+				if (timer) {
+					clearInterval(timer);
+					timer = null;
+				}
+				if (cdTimer) {
+					clearInterval(cdTimer);
+					cdTimer = null;
+				}
+				nextDueTs = 0;
+				updateStatus();
+			}
+
+			function restartTimer() {
+				console.debug("[Flashcards] restartTimer()", {
+					auto: my.auto,
+					parsedLen: my.parsed.length,
+					uiShowConfig: my.ui && my.ui.showConfig
+				});
+
+				stopTimer();
+				if (!my.auto || !my.parsed.length || (my.ui && my.ui.showConfig)) return;
+
+				const ivl = my.intervalMs || 5000;
+				nextDueTs = Date.now() + ivl;
+
+				cdTimer = setInterval(updateStatus, 250);
+
+				timer = setInterval(() => {
+					console.debug("[Flashcards] auto tick", {
+						flipStyle: my.flipStyle,
+						showingAnswer,
+						index: my.index
+					});
+					if (my.flipStyle === "reveal") {
+						if (!showingAnswer) {
+							showingAnswer = true;
+							render();
+						} else {
+							showingAnswer = false;
+							my.index = takeNextIndex();
+							render();
+						}
+					} else {
 						my.index = takeNextIndex();
 						render();
 					}
-				} else {
+					nextDueTs = Date.now() + ivl;
+					updateStatus();
+				}, ivl);
+			}
+
+			elControls.addEventListener("click", (e) => {
+				const b = e.target.closest("button[data-fc]");
+				if (!b) return;
+
+				e.preventDefault();
+				e.stopPropagation();
+
+				const act = b.dataset.fc;
+				console.debug("[Flashcards] controls click", { act, auto: my.auto });
+
+				if (act === "prev") {
+					my.index = takePrevIndex();
+					render();
+					if (my.auto) restartTimer();
+				} else if (act === "next") {
+					showingAnswer = false;
 					my.index = takeNextIndex();
 					render();
-				}
-				nextDueTs = Date.now() + ivl;
-				updateStatus();
-			}, ivl);
-		}
-
-		elControls.addEventListener("click", (e) => {
-			const b = e.target.closest("button[data-act]");
-			if (!b) return;
-
-			// Prevent bubbling into portal-level handlers and any default submit behavior
-			e.preventDefault();
-			e.stopPropagation();
-
-			const act = b.dataset.act;
-
-			if (act === "prev") {
-				my.index = takePrevIndex();
-				render();
-				if (my.auto) restartTimer();
-			} else if (act === "next") {
-				showingAnswer = false;
-				my.index = takeNextIndex();
-				render();
-				if (my.auto) restartTimer();
-			} else if (act === "mode") {
-				my.mode = my.mode === "drand" ? "sequential" : "drand";
-				save({ mode: my.mode });
-				reseedIfNeeded(true);
-				ensureInitialIndex();
-				showingAnswer = false;
-				render();
-				if (my.auto) restartTimer();
-			} else if (act === "auto") {
-				my.auto = !my.auto;
-				save({ auto: my.auto });
-				restartTimer();
-				render();
-			} else if (act === "flip") {
-				if (my.flipStyle === "reveal") {
-					showingAnswer = !showingAnswer;
+					if (my.auto) restartTimer();
+				} else if (act === "mode") {
+					my.mode = my.mode === "drand" ? "sequential" : "drand";
+					console.debug("[Flashcards] mode toggle", { mode: my.mode });
+					save({ mode: my.mode });
+					reseedIfNeeded(true);
+					ensureInitialIndex();
+					showingAnswer = false;
 					render();
-					if (my.auto) restartTimer(); // avoid spurious auto flip
-				}
-			} else if (act === "reset") {
-				stopTimer();
-				showingAnswer = false;
-				my.auto = false;
-				const next = save({ auto: false });
-				Object.assign(my, next);
+					if (my.auto) restartTimer();
+				} else if (act === "auto") {
+					my.auto = !my.auto;
+					console.debug("[Flashcards] auto toggle", { auto: my.auto });
+					save({ auto: my.auto });
+					restartTimer();
+					render();
+				} else if (act === "flip") {
+					console.debug("[Flashcards] flip button", {
+						flipStyle: my.flipStyle,
+						showingAnswer
+					});
+					if (my.flipStyle === "reveal") {
+						showingAnswer = !showingAnswer;
+						render();
+						if (my.auto) restartTimer();
+					}
+				} else if (act === "reset") {
+					console.debug("[Flashcards] reset button");
+					stopTimer();
+					showingAnswer = false;
+					my.auto = false;
+					const next = save({ auto: false });
+					Object.assign(my, next);
 
+					my.index = 0;
+					my.history = my.parsed.length ? [0] : [];
+					my.pool = [];
+					reseedIfNeeded(true);
+					ensureInitialIndex();
+					render();
+				} else if (act === "config") {
+					console.debug("[Flashcards] config button");
+					toggleConfig(true);
+				} else if (act === "purge") {
+					console.debug("[Flashcards] purge button");
+					stopTimer();
+					cancelPendingSave();
+
+					const latestAll =
+						(ctx && typeof ctx.getSettings === "function" && ctx.getSettings()) || {};
+					const nextAll = { ...latestAll };
+					delete nextAll.flashcards;
+					console.debug("[Flashcards] purge writing settings", nextAll);
+					ctx.setSettings(nextAll);
+
+					Object.assign(my, {
+						rawCSV: "",
+						sourceUrl: "",
+						parsed: [],
+						mode: "drand",
+						auto: false,
+						intervalMs: 5000,
+						flipStyle: "reveal",
+						index: 0,
+						pool: [],
+						history: [],
+						ui: { showConfig: false }
+					});
+
+					urlIn.value = "";
+					csvIn.value = "";
+					modeIn.value = "drand";
+					autoIn.value = "off";
+					intIn.value = 5;
+					flipIn.value = "reveal";
+
+					showingAnswer = false;
+					reseedIfNeeded(true);
+					ensureInitialIndex();
+					render();
+				}
+			});
+
+			host
+				.querySelector('[data-cfg="close"]')
+				.addEventListener("click", () => {
+					console.debug("[Flashcards] config close");
+					toggleConfig(false);
+				});
+
+			loadBtn.addEventListener("click", async () => {
+				const url = urlIn.value.trim();
+				if (!url) return;
+
+				console.debug("[Flashcards] load from URL", { url });
+
+				loadNote.textContent = "Loading…";
+				errOut.textContent = "";
+
+				try {
+					const resp = await fetch(url, { cache: "no-store" });
+					if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+					const txt = await resp.text();
+					csvIn.value = txt;
+
+					const next = save({
+						sourceUrl: url,
+						rawCSV: txt
+					});
+					Object.assign(my, next);
+
+					loadNote.textContent = "Loaded. (Remember to Save)";
+					setTimeout(() => (loadNote.textContent = ""), 1200);
+				} catch (err) {
+					console.error("[Flashcards] load from URL error", err);
+					loadNote.textContent = "CORS or fetch error. Please paste CSV instead.";
+					errOut.textContent = String(err && err.message ? err.message : err);
+				}
+			});
+
+			saveBtn.addEventListener("click", () => {
+				console.debug("[Flashcards] SAVE button clicked");
+
+				const csvText = csvIn.value || "";
+				console.debug("[Flashcards] SAVE csv snapshot", {
+					len: csvText.length,
+					head: csvText.slice(0, 160)
+				});
+
+				const parsed = parseCSV(csvText);
+				console.debug("[Flashcards] SAVE parsed result", {
+					records: parsed.records.length,
+					errors: parsed.errors
+				});
+
+				my.parsed = parsed.records;
 				my.index = 0;
 				my.history = my.parsed.length ? [0] : [];
 				my.pool = [];
+
 				reseedIfNeeded(true);
 				ensureInitialIndex();
-				render();
-				// no restartTimer(); auto is now off
-			} else if (act === "config") {
-				toggleConfig(true);
-			} else if (act === "purge") {
-				stopTimer();
-				cancelPendingSave();
-
-				const latestAll = ctx.getSettings();
-				const nextAll = { ...latestAll };
-				delete nextAll.flashcards;
-				ctx.setSettings(nextAll);
-
-				Object.assign(my, {
-					rawCSV: "",
-					sourceUrl: "",
-					parsed: [],
-					mode: "drand",
-					auto: false,
-					intervalMs: 5000,
-					flipStyle: "reveal",
-					index: 0,
-					pool: [],
-					history: [],
-					ui: { showConfig: false }
-				});
-
-				urlIn.value = "";
-				csvIn.value = "";
-				modeIn.value = "drand";
-				autoIn.value = "off";
-				intIn.value = 5;
-				flipIn.value = "reveal";
-
-				showingAnswer = false;
-				reseedIfNeeded(true);
-				ensureInitialIndex();
-				render();
-			}
-		});
-
-		host
-			.querySelector('[data-cfg="close"]')
-			.addEventListener("click", () => toggleConfig(false));
-
-		loadBtn.addEventListener("click", async () => {
-			const url = urlIn.value.trim();
-			if (!url) return;
-
-			loadNote.textContent = "Loading…";
-			errOut.textContent = "";
-
-			try {
-				const resp = await fetch(url, { cache: "no-store" });
-				if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-
-				const txt = await resp.text();
-				csvIn.value = txt;
 
 				const next = save({
-					sourceUrl: url,
-					rawCSV: txt
+					rawCSV: csvText,
+					sourceUrl: urlIn.value.trim(),
+					parsed: my.parsed
 				});
 				Object.assign(my, next);
 
-				loadNote.textContent = "Loaded. (Remember to Save)";
-				setTimeout(() => (loadNote.textContent = ""), 1200);
-			} catch (err) {
-				loadNote.textContent = "CORS or fetch error. Please paste CSV instead.";
-				errOut.textContent = String(err && err.message ? err.message : err);
-			}
-		});
+				errOut.textContent =
+					parsed.errors.length > 0
+						? "Imported with some row issues:\n" +
+							parsed.errors.map((e) => `Row ${e.row}: ${e.reason}`).join("\n")
+						: "Imported successfully.";
 
-		saveBtn.addEventListener("click", () => {
-			const parsed = parseCSV(csvIn.value || "");
-			my.parsed = parsed.records;
-			my.index = 0;
-			my.history = my.parsed.length ? [0] : [];
-			my.pool = [];
+				saveNote.textContent = "Saved.";
+				setTimeout(() => (saveNote.textContent = ""), 1000);
 
-			reseedIfNeeded(true);
-			ensureInitialIndex();
-
-			const next = save({
-				rawCSV: csvIn.value || "",
-				sourceUrl: urlIn.value.trim(),
-				parsed: my.parsed
+				toggleConfig(false);
+				showingAnswer = false;
+				render();
+				restartTimer();
 			});
-			Object.assign(my, next);
 
-			errOut.textContent =
-				parsed.errors.length > 0
-					? "Imported with some row issues:\n" +
-						parsed.errors.map((e) => `Row ${e.row}: ${e.reason}`).join("\n")
-					: "Imported successfully.";
+			// Initial glue
+			syncCfgInputs();
+			wireAutosave();
 
-			saveNote.textContent = "Saved.";
-			setTimeout(() => (saveNote.textContent = ""), 1000);
+			// IMPORTANT: honor persisted ui.showConfig WITHOUT saving from inside mount,
+			// otherwise ctx.setSettings() causes the portal to unmount+remount in a loop.
+			if (my.ui && my.ui.showConfig) {
+				console.debug(
+					"[Flashcards] mount() honoring persisted ui.showConfig=true without toggleConfig"
+				);
+				elConfig.style.display = "";
+				// Config is visible → timer must be stopped.
+				stopTimer();
+			}
 
-			toggleConfig(false);
+			reseedIfNeeded(false);
+			ensureInitialIndex();
 			showingAnswer = false;
 			render();
 			restartTimer();
-		});
 
-		// Initial glue
-		syncCfgInputs();
-		wireAutosave();
-		if (my.ui && my.ui.showConfig) {
-			toggleConfig(true);
+			// Resize observer for better fit
+			ro = new ResizeObserver(() => {
+				console.debug("[Flashcards] resize observer");
+				render();
+			});
+			ro.observe(host);
+
+			// Return unmount cleanup
+			return () => {
+				console.debug("[Flashcards] unmount cleanup");
+				stopTimer();
+				if (ro) {
+					try {
+						ro.disconnect();
+					} catch {
+						// noop
+					}
+				}
+			};
+		} catch (err) {
+			console.error("[Flashcards] mount() FATAL", err);
+			throw err; // allow portal to see the error, but at least it's logged now
 		}
-
-		reseedIfNeeded(false);
-		ensureInitialIndex();
-		showingAnswer = false;
-		render();
-		restartTimer();
-
-		// Resize observer for better fit
-		ro = new ResizeObserver(() => render());
-		ro.observe(host);
-
-		// Return unmount cleanup
-		return () => {
-			stopTimer();
-			if (ro) {
-				try {
-					ro.disconnect();
-				} catch {}
-			}
-		};
 	}
 
 	// Titlebar info-click → open the same config overlay (uses the gadget's own handler)
 	function onInfoClick(ctx, { slot, body }) {
-		// Prefer to invoke the gadget's config action so timers/state behave identically
-		const cfgBtn = body && body.querySelector('.fc-controls button[data-act="config"]');
+		console.debug("[Flashcards] onInfoClick()", { slot });
+		const cfgBtn = body && body.querySelector('.fc-controls button[data-fc="config"]');
 		if (cfgBtn) {
 			cfgBtn.click();
 			return;
 		}
-		// Fallback: force-show the overlay if the button isn't found
 		const cfg = body && body.querySelector('.fc-config');
 		if (cfg) cfg.style.display = "";
 	}
@@ -930,7 +1145,10 @@
 		/* Theme-aware tweaks via existing CSS vars */
 		.fc-notes { color: var(--muted); }
 	`;
-	const style = document.createElement("style");
-	style.textContent = css;
-	document.head.appendChild(style);
+	if (!document.getElementById("vizint-flashcards-css")) {
+		const style = document.createElement("style");
+		style.id = "vizint-flashcards-css";
+		style.textContent = css;
+		document.head.appendChild(style);
+	}
 })();
