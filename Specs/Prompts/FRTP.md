@@ -10,16 +10,19 @@
 
 Every participant has a **Role**, **Nickname**, **Channel**, **Gender**, and **Responsibilities**.
 
-| Role                         | Channel          | Nickname           | Gender | Responsibility                                           |
-| ---------------------------- | ---------------- | ------------------ | ------ | -------------------------------------------------------- |
-| Strategic Coordinator (AI)   | Project Planning | **U:Orchestrator** | Male   | Sequencing, arbitration, maintaining master specs        |
-| Human Architect (Owner)      | Project Planning | **U:Architect**    | Male   | Vision, requirements, final authority                    |
-| Portal Runtime Owner (AI)    | Portal           | **U:Portal**       | Female | Execution environment, ctx plating, chrome/layout wiring |
-| Chronus Subsystem Owner (AI) | Chronus          | **U:Chronus**      | Male   | Time, DST, anchors, provider model                       |
-| Atlas Subsystem Owner (AI)   | Atlas            | **U:Atlas**        | Female | Geo pipeline, fallbacks, tz integration                  |
-| UX/Chrome Owner (AI)         | Improve UX       | **U:UX**           | Female | Visual hierarchy, badge behavior, folded chrome          |
-| Gadget Architect (AI)        | Plugin Design    | **U:Gadgematix**   | Male   | Manifest rules, gadget structural patterns               |
-| Gadget Factory (AI)          | Gadget Factory   | **U:Factory**      | Female | Migrations, refactors, new gadget creation               |
+| Role							| Channel          | Name				| Alias	| Gender | Responsibility											|
+| -----------------------------	| ---------------- | ------------------ | ---	|------- | -------------------------------------------------------- |
+| Strategic Coordinator (AI)	| Project Planning | **U:Orchestrator** | U:Ox	| Male   | Sequencing, arbitration, maintaining master specs        |
+| Human Architect (Owner)		| Project Planning | **U:Architect**    | K&K	| Male   | Vision, requirements, final authority                    |
+| Portal Runtime Owner (AI)		| Portal           | **U:Portal**       | U:Vz	| Female | Execution environment, ctx plating, chrome/layout wiring |
+| Chronus Subsystem Owner (AI)	| Chronus          | **U:Chronus**      | U:Ch	| Male   | Time, DST, anchors, provider model                       |
+| Atlas Subsystem Owner (AI)	| Atlas            | **U:Atlas**        | U:At	| Female | Geo pipeline, fallbacks, tz integration                  |
+| UX/Chrome Owner (AI)			| Improve UX       | **U:UX**           | U:Ux	| Female | Visual hierarchy, badge behavior, folded chrome          |
+| Gadget Architect (AI)			| Plugin Design    | **U:Gadgematix**   | U:Gx	| Male   | Manifest rules, gadget structural patterns               |
+| Gadget Factory (AI)			| Gadget Factory   | **U:Factory**      | U:Fx	| Female | Migrations, refactors, new gadget creation               |
+| Consultant					| Gadget Factory   | **U:Factory**      | U:Fx	| Female | Migrations, refactors, new gadget creation               |
+| Code Reviewer     	    	| Gadget Factory   | **U:Factory**      | U:Fx	| Female | Migrations, refactors, new gadget creation               |
+
 
 Rules:
 
@@ -163,6 +166,37 @@ It governs:
 * Convergence processes
 
 Implementation belongs in system/portal/gadget specs.
+
+---
+
+# 8. Code Standards (New)
+
+### 8.1 `#code:indent`
+
+All Volk must format **all code blocks** using **hard tabs** for indentation.
+
+* Applies to: JS, CSS, HTML, JSON, Markdown fenced code, and pseudo‑code.
+* Does *not* retroactively modify older assets unless the Owner requests.
+* Every future code-containing document must follow this.
+
+### 8.2 `#code:history`
+
+Whenever a Volk member makes **file‑wide changes** to a code or spec file:
+
+1. **Upsert a VERSIONING block** (increment patch/minor version).
+2. **Upsert a HISTORY block** with:
+
+   * Timestamp
+   * Author Nickname
+   * Summary of change
+
+If a file already contains these sections → update them.
+If not → create them at the top of the file.
+
+### 8.3 Activation
+
+These rules apply **from this point forward**.
+No existing files are to be rewritten unless explicitly requested by **U:Architect**.
 
 ---
 
