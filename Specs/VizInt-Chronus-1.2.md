@@ -1,40 +1,12 @@
-# VizInt — Chronus v1.2 Specification
+# VizInt Chronus v1.2 — Complete Specification
 
-**Subsystem:** Time, DST, Anchors, Sequencer
-**Owner:** U:Chronus
-**Last Updated:** 2025-11-18
-**Status:** Final Draft (Ready for Orchestrator consolidation)
+> **Role:** U:Chronus — Time, DST, Anchors, Providers, Sequencer
+> **Status:** v1.2.3 (Implementation-Ready)
+> **Scope:** Chronus Core Library used by all VizInt Gadgets under System/Portal v1.2
+> **Tabs:** Hard tabs only
 
----
+## VERSIONING & HISTORY (#code:history compliant)
 
-## 0. PURPOSE & POSITION IN SYSTEM
-
-Chronus is the **canonical time engine** of VizInt.
-Its responsibilities: **time, DST, anchors, sequences, cursors**.
-Its job is to give **all gadgets** a stable interface for:
-
-* “What time is it in this timezone?”
-* “What are today’s anchors (sunrise, prayers, civic times, etc.)?”
-* “How do I navigate forward/backward in time?”
-* “How do I work with sequences (timelines, recipes, countdown steps)?”
-
-Chronus sits between:
-
-```
-Core → Atlas → Chronus → Gadgets
-```
-
-**Atlas = place** (geo, tz, lat/lon)
-**Chronus = time** (DST, computation, anchors, sequences)
-
-Chronus does **not** compute geolocation.
-Chronus *consumes* Atlas.
-
----
-
-## 1. VERSIONING & HISTORY (#code:history compliant)
-
-```md
 /*==============================================================================
 	VizInt – Chronus Core Specification
 	$VER: 1.2.2
@@ -42,263 +14,369 @@ Chronus *consumes* Atlas.
 	$COPYRIGHT: (c) 2024–2025 K&Co.
 
 $HISTORY:
-	2025/11/18	1.2.2	Integrated DST ownership clarifications, Atlas pull-model,
-					GeoEnvelope semantics, migration rules, provider spec.
-	2025/11/18	1.2.1	Added Chronus v1.2 public API facade (DST, providers,
-					sequencer, context/cursor); added legacy-warn rules.
-	2025/11/10	1.2.0	Moved to VizInt System/Portal 1.2 architecture.
+	2025/11/19	-	1.2.3	Added backlog section (runner/blender internalization), Atlas pull-model updates, merged older spec elements.
+	2025/11/18	-	1.2.2	Integrated DST ownership clarifications, Atlas pull-model,
+							GeoEnvelope semantics, migration rules, provider spec.
+							Added provider contract, refined context/cursor model.
+	2025/11/18	-	1.2.1	Added Chronus v1.2 public API facade (DST, providers,
+							sequencer, context/cursor); added legacy-warn rules.
+	2025/11/10	-	1.2.0	Moved to VizInt System/Portal 1.2 architecture.
+	2025/11/10	-	1.1.1	Added sequencer storage.
+	2025/11/01	-	1.1.0	Added multi-context model.
+	2025/10/30	-	1.0.0	Initial extraction.
 ==============================================================================*/
-```
 
 ---
 
-## 2. SCOPE OF CHRONUS v1.2
+# 1. Overview
+Chronus is the **authoritative Time Subsystem** for VizInt. It provides:
 
-### Chronus MUST:
+- Accurate wall-clock time
+- DST logic and UTC offset resolution
+- Anchor computation via providers (civil, prayerTimes, future providers)
+- Contexts and cursors for per-location time navigation
+- Global sequencer for multi-step timelines
+- A stable library API for all gadgets
 
-✓ Provide canonical time computation
-✓ Own DST logic
-✓ Compute anchors via providers
-✓ Own the sequencer (global scope)
-✓ Maintain contexts & cursors
-✓ Provide a stable library API under `ctx.libs.Chronus`
-✓ Allow optional provider-specific configs (e.g., madhab, method)
-✓ Work fully offline (`file://`)
+Chronus integrates with **Atlas** (geo pipeline) using a **pull-model** — Chronus requests geo as needed; Atlas never pushes.
 
-### Chronus MUST NOT:
-
-✗ Persist or shadow Atlas’s geo database
-✗ Call back into Atlas with mutations
-✗ Expose internal context/anchor caches as public API promises
-✗ Depend on any gadget state
+Chronus supports both:
+- `ctx.libs.Chronus` (canonical)
+- `window.Chronus` (legacy, with warnings)
 
 ---
 
-## 3. ARCHITECTURAL MODEL (Authoritative)
+# 2. Design Principles
 
-### 3.1 One-Way Dependency
-
-Chronus depends on **Atlas**.
-Atlas must **never** depend on Chronus.
-
-```
-Atlas → Chronus → Gadgets
-```
-
-Chronus pulls geo during:
-
-* startup (via Chronus.ready)
-* explicit getAnchors() calls
-* internal refresh cadence (e.g., hourly, after DST changes, after midnight rollover)
+1. **Chronus owns time.** DST, offsets, now(), transitions, day boundaries.
+2. **Atlas owns geography.** TZ, lat/lon, confidence, fallback.
+3. **Chronus pulls geo when needed.** Never subscribes to Atlas.
+4. **Providers compute anchors.** Chronus orchestrates, providers compute.
+5. **Contexts separate time views.** Each context has its own cursor & anchor set.
+6. **Sequencer is global in v1.2, scoped later.**
+7. **Legacy APIs work but warn.** Migration to v1.2+ APIs encouraged.
 
 ---
 
-## 4. GEOENVELOPE (ATLAS v1.2 INPUT MODEL)
+# 3. Chronus v1.2 Responsibilities
 
-Chronus accepts a `GeoEnvelope` object as *optional* input.
+This is the planned dependency chain:
+	Core → Atlas → Chronus → Gadgets
 
+Chronus MUST:
+- Provide DST-resolved time APIs.
+- Load built-in providers (civil, prayerTimes).
+- Expose a provider registry.
+- Compute anchors using providers.
+- Maintain per-context cursors.
+- Provide a global sequencer store.
+- Expose `Chronus.ready` to signal readiness.
+- Support optional geo inputs and default to `Atlas.getBestGeo()`.
+- Work fully offline and when loaded from the local file system (`file://`)
+- allow provider-specific configs (madhab, method, etc.)
+
+Chronus MUST NOT:
+- Write to Atlas caches.
+- Subscribe to Atlas events.
+- Persist geo inputs outside ephemeral context memory.
+-  expose internal context/anchor caches as public API promises
+-  NOT depend on any gadget state
+
+---
+
+# 4. Public API Surface
+
+## 4.1 Time & DST
+```js
+Chronus.nowUTC(): Date
+Chronus.nowInTZ(tz: string): Date
+Chronus.getOffset(tz: string, at?: Date): number  // minutes offset from UTC
+Chronus.getDSTInfo(tz: string, at?: Date): {
+	inDST: boolean,
+	offsetMinutes: number,
+	nextTransition: Date|null,
+	prevTransition: Date|null
+}
+Chronus.getDayBounds(tz: string, date?: Date): { start: Date, end: Date }
+```
+
+DST rules come from:
+- `Intl.DateTimeFormat().resolvedOptions().timeZone` (runtime
+- Bounded search for transitions
+
+
+DST Implementation Constraints
+DST is owned by Chronus, and:
+ - Use Intl.DateTimeFormat as the base truth
+ - Use bounded transition search (±1 year)
+ - No tzdata shipping in v1.2
+ - Must document limitations
+ - Must be predictable & deterministic within a runtime
+
+---
+
+## 4.2 Provider Registry
+```js
+Chronus.registerProvider(name: string, impl: Provider)
+Chronus.getProvider(name: string): Provider|null
+Chronus.listProviders(): string[]
+```
+
+Provider Contract:
 ```ts
-type GeoEnvelope = {
-	city:       string | null;
-	country:    string | null;    // ISO-3166 alpha-2
-	tz:         string | null;    // IANA timezone
-	lat:        number | null;
-	lon:        number | null;
-
-	confidence: "high" | "medium" | "low";
-	fallback:   null | "file-mode" | "permission-denied" | "offline" | "unknown";
-
-	source:     "device" | "ip" | "tz-only" | "manual" | "seed";
+type Provider = {
+	name: string,
+	init?(): Promise<void>,  // optional
+	computeAnchors(options: {
+		geo: GeoEnvelope,
+		date: Date,
+		contextId?: string,
+		...providerSpecific
+	}): Promise<ChronusAnchor[]>
 };
 ```
 
-### Chronus rules:
+Explicit provider interface including optional ready/init() and a provider table documenting built-in providers:
 
-* If provided → **use it directly**
-* If omitted → **Chronus MUST call `Atlas.getBestGeo()`**
-* Never mutate or persist GeoEnvelope
-* May store ephemeral snapshots **inside contexts only**, non-persistent
+ - civil – day bounds, “today”, sunrise/sunset, etc.
+ - prayerTimes – prayer anchors; sunrise/sunset may come from civil or prayerTimes depending on implementation.
 
+ Chronus should offer intelligent de-dupe options if multiple providers provide essentially the same event (such as sunset & maghreb) - starting off with user-preference based de-duping, and then evolving to other more intelligent options in the future.
 ---
 
-## 5. DST RESPONSIBILITY (v1.2 Canonical Rules)
+## 4.3 Anchors
+### 4.3.1 Anchor Type Taxonomy
+ - Atomic Anchors
+	- A single timestamp, e.g. Fajr, Sunrise, Noon
 
-### Chronus owns DST.
+ - Composite Anchors
+	- Derived from others, e.g. Next Prayer, Golden Hour
 
-Atlas **only** tells Chronus *which timezone* to use (`tz`).
-Chronus performs all DST calculations, including:
+ - Recurring Anchors
+	- Anchors that always fire daily (prayerTimes, civil)
 
-* is DST in effect?
-* next DST transition
-* previous DST transition
-* offsets at arbitrary timestamps
+ - Volatile Anchors
+	- Anchors dependent on short-term conditions (weather, astronomy, etc.)
 
-### Implementation (v1.2 constraints):
-
-➡ **Use `Intl.DateTimeFormat` as base truth**
-➡ Use a **bounded transition search** (±1 year)
-➡ No tzdata shipping in v1.2
-➡ Must document limitations
-➡ Predictable & deterministic behavior inside same runtime
-
----
-
-## 6. PROVIDER MODEL
-
-Chronus v1.2 owns a **plugin-like provider registry**.
-
-### Provider registration:
-
+ - User-defined Anchors
+	- Arbitrary gadget-defined timestamps
+### 4.3.2 Computation (Canonical Front Door)
 ```js
-Chronus.registerProvider(name, impl);
-Chronus.getProvider(name);
-Chronus.listProviders();
+Chronus.getAnchors({
+	provider?: string,      // default: "civil" or provider default
+	geo?: GeoEnvelope,      // optional — if missing, Chronus pulls from Atlas
+	date?: Date,            // default: today
+	contextId?: string|null
+	// provider-specific options...
+}): Promise<ChronusAnchor[]>
 ```
 
-### Provider contract:
-
-```ts
-interface ChronusProvider {
-	name: string;
-	init?(): Promise<void>;
-	ready?: Promise<void>;
-	computeAnchors(options: {
-		geo: GeoEnvelope;
-		date: Date;
-		// provider-specific options
-	}): Promise<ChronusAnchor[]>;
-}
-```
-
-### Built-in providers (v1.2):
-
-| Provider        | Responsibility                       |
-| --------------- | ------------------------------------ |
-| **civil**       | day bounds, “today”, sunrise/sunset* |
-| **prayerTimes** | prayer anchors                       |
-
-* Sunrise/sunset may be delivered by civil **or** prayerTimes depending on implementation.
-
----
-
-## 7. ANCHORS API (Canonical v1.2 API)
-
-### The new, universal API:
-
+Provider-centric semantics:
+- If `geo` missing → Chronus performs:
 ```js
-const anchors = await Chronus.getAnchors({
-	provider: "prayerTimes",   // or "civil"
-	geo,                       // optional → defaults to Atlas.getBestGeo()
-	date: new Date(),          // optional
-	contextId: "optional",     // does not affect semantics externally
-});
+const geo = await Atlas.getBestGeo();
 ```
+- Chronus may internally persist anchors in context store.
+- Externally, `getAnchors()` is pure: same input → same logical output.
 
-### Semantics:
-
-* Pure from gadget’s perspective
-* Same input → same output
-* Internally Chronus may cache anchors in context store
-* Legacy APIs (`upsertAnchors`, `getAnchors(contextId, frame)`) remain but show **console.warn**
-* v1.3 will formally deprecate them
+Semantics & Migration
+ - getAnchors() is the universal front door.
+ - Externally, getAnchors() is pure from gadget perspective; same input → same output.
+ - Explicit migration note:
+ 	- Legacy APIs remain but warn,
+ 	- v1.3 will formally deprecate them.
 
 ---
 
-## 8. CONTEXT & CURSOR MODEL
+## 4.4 Contexts & Cursors
 
-Chronus maintains **contexts** internally:
-
-```
-contextId → { cursor, geo, internalCache }
-```
-
-### Cursors
-
-Chronus exposes **cursor manipulation** internally v1.2
-Full public cursor API deferred to v1.3.
-
-Internal capabilities (v1.2):
-
+Chronus maintains contexts:
 ```ts
-getCursor(contextId): Date
-setCursor(contextId, date: Date)
-jump(contextId, { days?, hours?, minutes? })
+type Context = {
+	id: string,
+	anchors: Map<string, ChronusAnchor[]>, // frame → anchors
+	cursor: Date,
+	geo?: GeoEnvelope | null
+};
 ```
 
-Used by Runway, Runner, Blender, and potentially multi-city dashboards.
+Public cursor APIs in v1.2:
+```js
+Chronus.listContexts(): ContextSummary[]
+Chronus.getCursor(contextId): Date
+Chronus.setCursor(contextId, date: Date): void
+Chronus.jump(contextId, delta: { days?: number, hours?: number, minutes?: number }): void
+```
+
+Contexts are created automatically when anchor computation occurs. These cursor APIs are used by Runway, Runner, Blender, and multi-city dashboards to keep per-view time navigation consistent.
 
 ---
 
-## 9. SEQUENCER (GLOBAL SCOPE)
+# 5. Geo Envelope (Atlas v1.2)
 
-Sequencer is **global**, not per-gadget or per-context.
+Chronus accepts:
+```ts
+type GeoEnvelope = {
+	city: string|null,
+	country: string|null,
+	tz: string|null,
+	lat: number|null,
+	lon: number|null,
+	confidence: "high" | "medium" | "low",
+	fallback: null | "file-mode" | "permission-denied" | "offline" | "unknown",
+	source: "device" | "ip" | "tz-only" | "manual" | "seed"
+};
+```
 
-### API:
+Rules:
+ - If provided: use it directly
+ - If omitted: MUST call Atlas.getBestGeo()
+ - If `geo.tz` missing → fallback to system tz.
+ - If lat/lon missing → prayer-based providers operate in degraded mode.
+ - Never mutate or persist the envelope
+ - MAY keep ephemeral snapshots inside contexts only, non-persistent
 
+---
+
+# 6. Sequencer (v1.2 Global Library)
+
+Sequencer is global and stored under `chronus.sequences.v1`.
+
+API:
 ```js
 const seq = Chronus.getSequencer();
-
-// Manage sequences
-seq.getSequences()
-seq.upsertSequences([...])
-seq.deleteSequences([...])
+seq.getSequences(): Sequence[]
+seq.upsertSequences(list: Sequence[]): void
+seq.deleteSequences(ids: string[]): void
 ```
 
-### Requirements:
-
-* Backward compatible with existing sequencer
-* Chronus v1.2 may provide adapters and wrappers
-* v1.3 may add scoping
-
----
-
-## 10. CHRONUS.READY SEMANTICS
-
-Chronus.ready MUST resolve when:
-
-1. Core structures are initialized
-2. Providers are registered
-3. Provider init() calls completed
-4. Sequencer storage available
-5. Atlas is ready (Chronus MUST `await Atlas.ready`)
-6. Chronus performs an initial geo pull + anchor computation
-
-Chronus.ready MUST NOT hang.
-
----
-
-## 11. LEGACY API RULES (MANDATORY)
-
-Chronus must maintain `window.Chronus` **only for backward compatibility**.
-
-### Legacy API warnings:
-
-When any of these are called:
-
-* `Chronus.upsertAnchors`
-* `Chronus.getAnchors({ contextId, frame })`
-* `Chronus.addContext`
-* `Chronus.listContexts()`
-
-Chronus must issue (once per symbol):
-
-```
-console.warn("[Chronus] Legacy API used: upsertAnchors(). This will be removed in v1.3. Use getAnchors() instead.");
+Sequence structure:
+```ts
+type Sequence = {
+	id: string,
+	label: string,
+	steps: Array<{
+		stepId?: string,
+		description: string,
+		minutes?: number,
+		mode?: "fg" | "bg"
+	}>
+};
 ```
 
 ---
 
-## 12. FILE-MODE & window.Chronus / window.Atlas
+# 7. Legacy API Compatibility
 
-### Rules:
+Legacy globals remain available:
+```js
+Chronus.upsertAnchors(...)
+Chronus.getAnchors({ contextId, frame })  // legacy style
+Chronus.addContext(...)
+Chronus.listContexts()
+```
 
-* Chronus must maintain `window.Chronus` for compatibility
-* **Atlas does NOT get mirrored to window.Atlas**
+Each logs a **one-time** warning:
+```
+[Chronus] Legacy API used: X — will be deprecated in v1.3. Please migrate to Chronus.getAnchors().
+```
 
-  * No global `window.Atlas` object
-  * All gadgets use `ctx.libs.Atlas`
-  * File-mode Atlas is injected by Portal, not placed on window
-
-This is now the canonical rule.
+Legacy behavior remains stable for all existing gadgets.
 
 ---
+
+# 8. Integration with Atlas (Updated Contract)
+
+Chronus v1.2 uses **pull model**:
+
+```js
+await Atlas.ready;
+
+function refresh() {
+	const geo = Atlas.getBestGeo();
+	Chronus.computeAnchorsFromGeo(geo);
+}
+
+refresh();
+Chronus.onInternalRefresh(refresh);
+```
+
+Rules:
+- Chronus MAY depend on Atlas.
+- Chronus MUST NOT write to Atlas.
+- Chronus MUST NOT assume high precision geo.
+- Chronus MUST degrade gracefully.
+
+---
+
+# 9. Readiness Lifecycle
+
+Chronus.ready performs an initial geo pull and at least one anchor computation in its default context, so gadgets can assume a warm cache.
+
+`Chronus.ready` resolves when:
+- Core structures initialized.
+- Built-in providers are registered.
+- Sequencer storage available.
+- Atlas.ready (if Atlas present) has resolved.
+
+Chronus.ready MUST NOT hang on degraded inputs.
+
+---
+
+# 10. Internal Architecture
+
+Chronus includes these internal subsystems:
+
+### 10.1 Time Core
+- now()
+- offset()
+- DST transition search
+- local/UTC conversion
+
+### 10.2 Context Manager
+- Map<contextId → context>
+- Anchor store per frame
+- Cursor per context
+
+### 10.3 Provider Engine
+- Registry
+- Adapter for provider API
+- Invocation logic for computeAnchors
+
+### 10.4 Sequencer Engine
+- Global store in localStorage
+- Upsert/delete/filter
+
+### 10.5 Legacy Compatibility Layer
+- Window global surface
+- Warning emissions
+
+---
+
+# 11. Backlog (v1.3+)
+
+### 11.1 Integrate Runner & Blender Inside Chronus
+Move existing runner.js and blender.js into Chronus core:
+- Unified scheduling engine
+- Unified time-window blending
+- Shared cursor semantics
+- Nexus-based update triggers
+
+### 11.2 Cursor API Expansion
+- Shared cursors across gadgets
+- Lock/hold/release semantics
+- Cursor observers
+
+### 11.3 Provider Families
+- Calendars
+- Regional schedules
+- Habit/event engines
+
+### 11.4 Enhanced Atlas Cooperation
+- Explicit GeoEnvelope diffing
+- Multi-city parallel contexts
+- Time travel debugging hooks
+
+---
+
+# END OF SPEC
