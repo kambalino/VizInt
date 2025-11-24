@@ -57,7 +57,7 @@
 				.map((l) => (l.match(re) || []).length)
 				.reduce((a, b) => a + b, 0);
 		const C = count(/,/g);
-		const S = count(/;/g);
+		const S = count(/;/g/);
 		const T = count(/\t/g);
 		const best = Math.max(C, S, T);
 		return best === S ? ";" : best === T ? "\t" : ",";
@@ -75,42 +75,42 @@
 		let inQ = false;
 
 		while (i < text.length) {
-            const ch = text[i];
-            if (inQ) {
-                if (ch === '"') {
-                    if (text[i + 1] === '"') {
-                        field += '"';
-                        i += 2;
-                    } else {
-                        inQ = false;
-                        i++;
-                    }
-                } else {
-                    field += ch;
-                    i++;
-                }
-            } else {
-                if (ch === '"') {
-                    inQ = true;
-                    i++;
-                } else if (ch === delim) {
-                    row.push(field);
-                    field = "";
-                    i++;
-                } else if (ch === "\r") {
-                    i++;
-                } else if (ch === "\n") {
-                    row.push(field);
-                    rows.push(row);
-                    row = [];
-                    field = "";
-                    i++;
-                } else {
-                    field += ch;
-                    i++;
-                }
-            }
-        }
+			const ch = text[i];
+			if (inQ) {
+				if (ch === '"') {
+					if (text[i + 1] === '"') {
+						field += '"';
+						i += 2;
+					} else {
+						inQ = false;
+						i++;
+					}
+				} else {
+					field += ch;
+					i++;
+				}
+			} else {
+				if (ch === '"') {
+					inQ = true;
+					i++;
+				} else if (ch === delim) {
+					row.push(field);
+					field = "";
+					i++;
+				} else if (ch === "\r") {
+					i++;
+				} else if (ch === "\n") {
+					row.push(field);
+					rows.push(row);
+					row = [];
+					field = "";
+					i++;
+				} else {
+					field += ch;
+					i++;
+				}
+			}
+		}
 		row.push(field);
 		rows.push(row);
 
@@ -189,6 +189,9 @@
 		});
 
 		try {
+			// Mark host as flashcards root so CSS can target it for modal overlay
+			host.classList.add("fc-root");
+
 			// Persisted (user intent only)
 			const s =
 				(ctx && typeof ctx.getSettings === "function" && ctx.getSettings()) || {};
@@ -407,6 +410,7 @@
 				</div>
 			`;
 
+			const elWrap = host.querySelector(".fc-wrap");
 			const elFront = host.querySelector(".fc-front");
 			const elBack = host.querySelector(".fc-back");
 			const elInline = host.querySelector(".fc-inline");
@@ -448,7 +452,7 @@
 				});
 			}
 
-			function wireAutosave(){
+			function wireAutosave() {
 				const saveField = () => {
 					console.debug("[Flashcards] AUTOSAVE blur");
 					const next = save({
@@ -458,7 +462,7 @@
 					});
 					Object.assign(my, next);
 					saveNote.textContent = "Autosaved.";
-					setTimeout(()=> saveNote.textContent="", 1000);
+					setTimeout(() => (saveNote.textContent = ""), 1000);
 				};
 				urlIn.addEventListener("blur", saveField);
 				csvIn.addEventListener("blur", saveField);
@@ -506,6 +510,7 @@
 				console.debug("[Flashcards] toggleConfig()", { show, silent });
 
 				elConfig.style.display = show ? "" : "none";
+				if (elWrap) elWrap.style.display = show ? "none" : "";
 
 				const nextState = !!show;
 				const prevState = !!(my.ui && my.ui.showConfig);
@@ -1046,6 +1051,7 @@
 					"[Flashcards] mount() honoring persisted ui.showConfig=true without toggleConfig"
 				);
 				elConfig.style.display = "";
+				if (elWrap) elWrap.style.display = "none";
 				stopTimer();
 			}
 
@@ -1098,6 +1104,8 @@
 
 	// ===== Styles (scoped-ish) =====
 	const css = `
+		.fc-root { position:relative; height:100%; }
+
 		.fc-wrap { display:flex; flex-direction:column; gap:8px; height:100%; }
 		.fc-card {
 			display:flex; flex-direction:column; align-items:center; justify-content:center;
@@ -1124,14 +1132,21 @@
 		.fc-controls { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
 		.fc-flex { flex:1; }
 
-		.fc-config { position: relative; z-index: 2; }
+		.fc-config {
+			position:absolute;
+			inset:0;
+			z-index:2;
+			display:flex;
+			flex-direction:column;
+			padding:8px;
+		}
 		.fc-cfg-head {
 			display:flex; align-items:center; justify-content:space-between;
 			margin:-8px -8px 8px -8px; padding:6px 8px;
 			border-bottom:1px solid rgba(0,0,0,0.08);
 		}
 		.fc-cfg-title { font-weight:600; }
-		.fc-cfg-body { display:block; }
+		.fc-cfg-body { display:block; overflow:auto; }
 		.fc-config .field label { font-weight:600; }
 		.fc-config .field textarea, .fc-config .field input, .fc-config .field select { width:100%; }
 
