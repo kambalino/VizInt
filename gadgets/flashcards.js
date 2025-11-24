@@ -56,11 +56,22 @@
 			firstLines
 				.map((l) => (l.match(re) || []).length)
 				.reduce((a, b) => a + b, 0);
+
 		const C = count(/,/g);
-		const S = count(/;/g/);
+		const S = count(/;/g);
 		const T = count(/\t/g);
-		const best = Math.max(C, S, T);
-		return best === S ? ";" : best === T ? "\t" : ",";
+		const P = count(/\|/g);
+
+		const best = Math.max(C, S, T, P);
+
+		// If we saw no delimiters at all, just fall back to comma
+		if (best === 0) return ",";
+
+		// Tie-breaking: prefer pipe, then tab, then semicolon, then comma
+		if (best === P) return "|";
+		if (best === T) return "\t";
+		if (best === S) return ";";
+		return ",";
 	}
 
 	// CSV → { records:[{a,b,notes}], errors, delimiter }
@@ -341,11 +352,11 @@
 					<hr class="fc-hr" />
 					<div class="fc-controls">
 						<button type="button" class="gbtn" data-fc="prev"  title="Previous">⏮️</button>
-						<button type="button" class="gbtn" data-fc="next"  title="Next">⏭️</button>
+						<button type="button" class="gbtn" data-fc="next"  title="Next">⏭️</button> |
 						<button type="button" class="gbtn" data-fc="mode"  title="Toggle Mode (Sequential / Diminishing Random)">🔁</button>
-						<button type="button" class="gbtn" data-fc="auto"  title="Auto On/Off">▶️</button>
+						<button type="button" class="gbtn" data-fc="auto"  title="Auto On/Off">▶️</button> 
+						<button type="button" class="gbtn" data-fc="reset" title="Reset Deck">🧹</button> |
 						<button type="button" class="gbtn" data-fc="flip"  title="Flip / Reveal">🔄</button>
-						<button type="button" class="gbtn" data-fc="reset" title="Reset Deck">🧹</button>
 						<span class="fc-flex"></span>
 						<button type="button" class="gbtn" data-fc="config" title="Settings">⚙️</button>
 						<button type="button" class="gbtn" data-fc="purge"  title="Erase Flash Cards data">🗑️</button>
@@ -360,14 +371,15 @@
 						</div>
 					</div>
 					<div class="fc-cfg-body">
-						<div class="field">
+						<div class="field fc-url-row">
 							<label for="fc-url">Deck URL</label>
-							<input type="text" id="fc-url" name="fc-url" placeholder="https://example.com/deck.csv" />
-						</div>
-						<div class="field">
-							<button type="button" class="gbtn" id="fc-load">Load from URL</button>
+							<div class="fc-url-input-row">
+								<input type="text" id="fc-url" name="fc-url" placeholder="https://example.com/deck.csv" />
+								<button type="button" class="gbtn" id="fc-load" title="Load from URL">⬆️</button>
+							</div>
 							<span class="muted fineprint" id="fc-load-note"></span>
 						</div>
+						<div class="muted fineprint">Examples: https://kambalino.github.io/VizInt/Specs/flashcards_it_100.csv</div>
 						<div class="field" style="grid-template-columns:1fr;">
 							<label for="fc-csv">Paste CSV</label>
 							<textarea id="fc-csv" name="fc-csv" rows="8" placeholder='"Side A","Side B","Notes"'></textarea>
@@ -746,9 +758,9 @@
 						if (nt) fitText(nt, 12, 28);
 					} else {
 						if (!showingAnswer) {
-							fitText(elFront.querySelector(".fc-q"), 32, 140);
+							fitText(elFront.querySelector(".fc-q"), 52, 140);
 						} else {
-							fitText(elBack.querySelector(".fc-a"), 24, 96);
+							fitText(elBack.querySelector(".fc-a"), 34, 96);
 						}
 						const nt = elBack.querySelector(".fc-notes");
 						if (nt) fitText(nt, 12, 28);
@@ -1103,15 +1115,37 @@
 	window.GADGETS.flashcards = { manifest, info, mount, onInfoClick };
 
 	// ===== Styles (scoped-ish) =====
-	const css = `
-		.fc-root { position:relative; height:100%; }
-
-		.fc-wrap { display:flex; flex-direction:column; gap:8px; height:100%; }
-		.fc-card {
-			display:flex; flex-direction:column; align-items:center; justify-content:center;
-			flex:1 1 auto;
-			min-height: 160px; padding: 8px;
+	const css = `	
+		.fc-root {
+			position:relative;
+			height:100%;
+			min-height:0;
+			display:flex;
+			flex-direction:column;
+			padding-bottom:24px;   /* reserve space for toolbar row */
+			box-sizing:border-box;
 		}
+	
+
+		.fc-wrap {
+			display:flex;
+			flex-direction:column;
+			flex:1 1 auto;
+			min-height:0;
+			overflow:hidden;              /* no scroll here – keeps toolbar pinned */
+		}
+
+		.fc-card {
+			display:flex;
+			flex-direction:column;
+			align-items:center;
+			justify-content:center;
+			flex:1 1 auto;
+			min-height: 0;
+			padding:8px;
+			overflow:auto;                /* if space is tight, *card* scrolls, not controls */
+		}
+
 		.fc-front, .fc-back, .fc-inline {
 			width: 100%;
 			height: 100%;
@@ -1132,23 +1166,46 @@
 		.fc-controls { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
 		.fc-flex { flex:1; }
 
+
 		.fc-config {
-			position:absolute;
-			inset:0;
-			z-index:2;
+			/* when hidden, JS sets display:none; when shown, we want full-height flex */
 			display:flex;
 			flex-direction:column;
+			flex:1 1 auto;
+			min-height:0;
 			padding:8px;
 		}
+
 		.fc-cfg-head {
-			display:flex; align-items:center; justify-content:space-between;
-			margin:-8px -8px 8px -8px; padding:6px 8px;
+			display:flex;
+			align-items:center;
+			justify-content:space-between;
+			margin:-8px -8px 8px -8px;
+			padding:6px 8px;
 			border-bottom:1px solid rgba(0,0,0,0.08);
 		}
+
+		.fc-cfg-body {
+			flex:1 1 auto;
+			overflow-y:auto;      /* vertical only */
+			overflow-x:hidden;    /* suppress horizontal slider */
+		}
+
 		.fc-cfg-title { font-weight:600; }
-		.fc-cfg-body { display:block; overflow:auto; }
 		.fc-config .field label { font-weight:600; }
 		.fc-config .field textarea, .fc-config .field input, .fc-config .field select { width:100%; }
+		
+		.fc-url-row .fc-url-input-row {
+			display:flex;
+			align-items:center;
+			gap:4px;
+		}
+		.fc-url-row .fc-url-input-row input {
+			flex:1 1 auto;
+		}
+		.fc-url-row .fc-url-input-row button {
+			flex:0 0 auto;
+		}
 
 		/* Theme-aware tweaks via existing CSS vars */
 		.fc-notes { color: var(--muted); }
