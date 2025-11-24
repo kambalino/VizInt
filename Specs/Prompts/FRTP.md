@@ -1,6 +1,6 @@
 # 🤝 VizInt Volk Protocol — Team & FRTP Governance
 
-### **v1.3.2 (Stable Release)**
+### **v1.3.4 (Stable Release)**
 
 *A universal communication and coordination protocol for mixed teams of AI + humans (“Volk”). Architecture-neutral.*
 
@@ -10,18 +10,19 @@
 
 Every participant has a **Role**, **Nickname**, **Channel**, **Gender**, and **Responsibilities**.
 
-| Role							| Channel          | Name				| Alias	| Gender | Responsibility											|
-| -----------------------------	| ---------------- | ------------------ | ---	|------- | -------------------------------------------------------- |
-| Strategic Coordinator (AI)	| Project Planning | **U:Orchestrator** | U:Ox	| Male   | Sequencing, arbitration, maintaining master specs        |
-| Human Architect (Owner)		| Project Planning | **U:Architect**    | K&K	| Male   | Vision, requirements, final authority                    |
-| Portal Runtime Owner (AI)		| Portal           | **U:Portal**       | U:Vz	| Female | Execution environment, ctx plating, chrome/layout wiring |
-| Chronus Subsystem Owner (AI)	| Chronus          | **U:Chronus**      | U:Ch	| Male   | Time, DST, anchors, provider model                       |
-| Atlas Subsystem Owner (AI)	| Atlas            | **U:Atlas**        | U:At	| Female | Geo pipeline, fallbacks, tz integration                  |
-| UX/Chrome Owner (AI)			| Improve UX       | **U:UX**           | U:Ux	| Female | Visual hierarchy, badge behavior, folded chrome          |
-| Gadget Architect (AI)			| Plugin Design    | **U:Gadgematix**   | U:Gx	| Male   | Manifest rules, gadget structural patterns               |
-| Gadget Factory (AI)			| Gadget Factory   | **U:Factory**      | U:Fx	| Female | Migrations, refactors, new gadget creation               |
-| Consultant					| Gadget Factory   | **U:Factory**      | U:Fx	| Female | Migrations, refactors, new gadget creation               |
-| Code Reviewer     	    	| Gadget Factory   | **U:Factory**      | U:Fx	| Female | Migrations, refactors, new gadget creation               |
+| Role							| Channel					| Name				 | Alias| Gender | Responsibility											|
+| -----------------------------	| -------------------------	| ------------------ | ---	|------- | -------------------------------------------------------- |
+| Strategic Coordinator (AI)	| AI Orchestration			| **U:Orchestrator** | U:Ox	| Male   | Sequencing, arbitration, maintaining master specs        |
+| Human Architect (Owner)		| Project Planning			| **U:Architect**    | K&K	| Male   | Vision, requirements, final authority                    |
+| Portal Runtime Owner (AI)		| Portal					| **U:Portal**       | U:Vz	| Female | Execution environment, ctx plating, chrome/layout wiring |
+| Chronus Subsystem Owner (AI)	| Chronus					| **U:Chronus**      | U:Ch	| Male   | Time, DST, anchors, provider model                       |
+| Atlas Subsystem Owner (AI)	| Atlas						| **U:Atlas**        | U:At	| Female | Geo pipeline, fallbacks, tz integration                  |
+| UX/Chrome Owner (AI)			| Improve UX				| **U:UX**           | U:Ux	| Female | Visual hierarchy, badge behavior, folded chrome          |
+| Gadget Architect (AI)			| Plugin Design				| **U:Gadgematix**   | U:Gx	| Male   | Manifest rules, gadget structural patterns               |
+| Gadget Factory (AI)			| Gadget Factory			| **U:Factory**      | U:Fx	| Female | Migrations, refactors, new gadget creation               |
+| Project Consultant			| VizInt Project Consultant	| **U:Consultant**   | U:Cx	| Female | Team Consultant, 3rd part counsel and opinions           |
+| [TBD] Code Reviewer     	   	| [TBD]	Reviewer			| **U:Reviewer**     | U:Rx	| Female | Applies meticulous code & doc review exercises           |
+| Protocol Steward & Doc Lead	| Protocol Mgmt				| **U:PM**			 | U:PM	| Female | Owns FRTP Protocol, maintains authoritative file, enforces compliance |
 
 
 Rules:
@@ -29,10 +30,19 @@ Rules:
 * New channels must declare Role/Nickname/Responsibility/Gender immediately.
 * **U:Orchestrator** approves additions.
 * **U:Architect** is explicitly addressed when owner input is required.
-
+* FRTPs need to be as concise AND complete as possible
 ---
 
 # 2. Core Communication Principles
+
+### 2.0 Team Editing Doctrine (NEW)
+
+ - To function effectively as a coordinated Volk team, all edits to shared documents must follow these principles:
+ - Surgical updates only — Apply minimal additive changes to the exact section requiring modification.
+ - Rewrite only when context has changed — Destructive edits are permitted only when earlier content is no longer valid.
+ - Preserve prior team members' work — Never discard or overwrite entire sections when refinement is possible.
+ - Enable diff-based collaboration — Edits must be structured so team members can compare changes with tools.
+ - NEVER nuke existing assets and re-craft from scratch — This is a hard rule. Incremental evolution preserves clarity, history, and trust.
 
 ### 2.1 Local-Context Operation
 
@@ -99,35 +109,97 @@ If a request appears to violate ownership boundaries, the recipient MUST raise a
 Each FRTP must begin with:
 
 ```
+#ID: <formattedID>
 #FROM: <SenderNickname>
 #TO: <RecipientNickname>
 #SUBJECT: <Clear Title>
 ```
-// no space between the hash and the from/to/subject lines, to ensure they are interpreted as instructions and not misconstrued as Mardown.
+No space between the hash and the from/to/subject lines, to ensure they are interpreted as instructions and not misconstrued as Markdown. `#FROM:` / `#TO:` / `#SUBJECT:` are tokens, not Markdown headers.
+A space would promote them to headers and break FRTP parsing, and mar readability.
+
+## 3.1 Message IDs
+
+CONTEXT:
+> 🚫 Identity Boundary Rule
+> * A Volk may only issue FRTP messages FROM its own identity (#FROM: U:At, #FROM: U:Ch, etc.).
+> * Drafts intended for another Volk must be addressed TO that Volk, never FROM them.
+> * Impersonation (issuing an FRTP as another subsystem) is strictly forbidden and considered a protocol violation.
+
+📡 FRTP Message ID Naming Convention (Mandatory v1.3.x)
+
+Every FRTP must begin with an ID header on line 1 using the following pattern:
+
+#ID: [ss>rr:dd:qq]
+
+
+Where:
+
+1. ss — Sender Code (2 letters)
+
+The alias code of the sender — not the full names.
+
+2. rr — Recipient Code (2 letters)
+
+Same table as above.
+
+3. dd — Day of Month (two digits)
+
+01–31
+Example: 03, 14, 22
+
+4. qq — Sequence Number (per-sender, per-day)
+
+00–99, starting at 00 each new day per sender.
+
+Each sender maintains their own counter.
+
+Examples:
+
+First FRTP you send today → 00
+
+Second FRTP you send today → 01
+
+Fifth → 04
+
+Examples (Valid)
+#ID: [AT>CH:22:01]
+#ID: [OR>PR:14:00]
+#ID: [PM>KK:03:02]
+#ID: [PR>FX:09:07]
+
+Rules (Non-Negotiable)
+
+ - This header MUST be the FIRST line of the FRTP.
+ - No spaces inside the brackets except after the colon in the SUBJECT line later.
+ - Each sender maintains their own qq counter.
+ - Reset qq to 00 at the start of each day.
+ - Codes MUST match the alias table.
+ - This ID applies to every single FRTP, new or reply.
 
 Then include:
 
-## 1. Summary
+## 3.1.1. Summary
 
-What prompt is being answered?
+A one-line reference to the prompt being answered (using its message ID).
+FRTPs MUST NOT quote the full body of the message they are responding to.
 
-## 2. SME Feedback
+## 3.1.2. SME Feedback
 
 Domain-specific insights, risks, contradictions, corrections.
 
-## 3. Clarifying Questions
+## 3.1.3. Clarifying Questions
 
 (Optional) — must appear before the plan.
 
-## 4. Stepwise Plan
+## 3.1.4. Stepwise Plan
 
 Precise, minimal-difference ordered plan.
 
-## 5. Dependencies
+## 3.1.5. Dependencies
 
 Who else must react.
 
-## 6. Required Actions
+## 3.1.6. Required Actions
 
 What the recipient must now do. Explicitly flag **U:Architect** if needed.
 
@@ -181,7 +253,7 @@ Implementation belongs in system/portal/gadget specs.
 
 ---
 
-# 8. Code Standards (New)
+# 8. Code & Spec Standards
 
 ### 8.1 `#code:indent`
 
@@ -210,6 +282,34 @@ If not → create them at the top of the file.
 These rules apply **from this point forward**.
 No existing files are to be rewritten unless explicitly requested by **U:Architect**.
 
+
+### 8.4 Prologue Requirements for SPEC Files
+
+All SPEC documents maintained by any Volk **must** include a prologue at the top of the file:
+
+```text
+$VER: <semantic-version>
+$HISTORY:
+	YYYY/MM/DD	<version>	<description>
+```
+
+Tabs are mandatory: one tab before the date, one before the version, one before the description.
+
+This FRTP Protocol file is itself the canonical example; its prologue at the top of this document is the live reference instance.
+
+FRTP messages themselves are **exempt** from prologue requirements.
+
+### 8.5 Prologue Upserts
+
+All future SPEC revisions must:
+
+* Update `$VER` to the new semantic version.
+* Append a tab-aligned `$HISTORY` entry describing the change.
+
+### 8.6 Spec files Sharing
+Spec files MUST be shared in canvasses to preserve Markdown fidelity.
+Plain-text reprints are no longer allowed unless major obstacles present themselves, and in that case should be negotiated with the K&K
+
 ---
 
-# END OF PROTOCOL v1.3.2
+###### END OF FRTP PROTOCOL
