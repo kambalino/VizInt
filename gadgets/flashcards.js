@@ -6,8 +6,8 @@
 		_class: "FlashCards",
 		_type: "singleton",
 		_id: "Local",
-		_ver: "v0.2.8",
-		verblurb: "auto-reparse on mount; parseCSV instrumentation",
+		_ver: "v0.2.9",
+		verblurb: "auto-reparse on mount; parseCSV instrumentation; silent toggleConfig after save",
 		label: "Flash Cards",
 		iconEmoji: "🎓",
 		capabilities: ["network"], // URL fetch (paste works offline)
@@ -31,19 +31,19 @@
 
 		const walk = (node) => {
 			for (const n of Array.from(node.childNodes)) {
-                if (n.nodeType === Node.ELEMENT_NODE) {
-                    if (!ALLOWED.has(n.tagName)) {
-                        while (n.firstChild) node.insertBefore(n.firstChild, n);
-                        node.removeChild(n);
-                        continue;
-                    }
-                    const atts = Array.from(n.attributes);
-                    for (const a of atts) n.removeAttribute(a.name);
-                    walk(n);
-                } else if (n.nodeType === Node.COMMENT_NODE) {
-                    node.removeChild(n);
-                }
-            }
+				if (n.nodeType === Node.ELEMENT_NODE) {
+					if (!ALLOWED.has(n.tagName)) {
+						while (n.firstChild) node.insertBefore(n.firstChild, n);
+						node.removeChild(n);
+						continue;
+					}
+					const atts = Array.from(n.attributes);
+					for (const a of atts) n.removeAttribute(a.name);
+					walk(n);
+				} else if (n.nodeType === Node.COMMENT_NODE) {
+					node.removeChild(n);
+				}
+			}
 		};
 		walk(temp);
 		return temp.innerHTML;
@@ -75,42 +75,42 @@
 		let inQ = false;
 
 		while (i < text.length) {
-			const ch = text[i];
-			if (inQ) {
-				if (ch === '"') {
-					if (text[i + 1] === '"') {
-						field += '"';
-						i += 2;
-					} else {
-						inQ = false;
-						i++;
-					}
-				} else {
-					field += ch;
-					i++;
-				}
-			} else {
-				if (ch === '"') {
-					inQ = true;
-					i++;
-				} else if (ch === delim) {
-					row.push(field);
-					field = "";
-					i++;
-				} else if (ch === "\r") {
-					i++;
-				} else if (ch === "\n") {
-					row.push(field);
-					rows.push(row);
-					row = [];
-					field = "";
-					i++;
-				} else {
-					field += ch;
-					i++;
-				}
-			}
-		}
+            const ch = text[i];
+            if (inQ) {
+                if (ch === '"') {
+                    if (text[i + 1] === '"') {
+                        field += '"';
+                        i += 2;
+                    } else {
+                        inQ = false;
+                        i++;
+                    }
+                } else {
+                    field += ch;
+                    i++;
+                }
+            } else {
+                if (ch === '"') {
+                    inQ = true;
+                    i++;
+                } else if (ch === delim) {
+                    row.push(field);
+                    field = "";
+                    i++;
+                } else if (ch === "\r") {
+                    i++;
+                } else if (ch === "\n") {
+                    row.push(field);
+                    rows.push(row);
+                    row = [];
+                    field = "";
+                    i++;
+                } else {
+                    field += ch;
+                    i++;
+                }
+            }
+        }
 		row.push(field);
 		rows.push(row);
 
@@ -187,20 +187,6 @@
 			hasGetSettings: !!(ctx && ctx.getSettings),
 			hasSetSettings: !!(ctx && ctx.setSettings)
 		});
-
-		/*
-		// --- HARD ABORT SWITCH ---
-		// If things ever go totally sideways (e.g. infinite remount loop),
-		// you can temporarily uncomment this block to completely
-		// short-circuit the gadget and avoid touching ctx at all.
-		// console.warn("[Flashcards] HARD ABORT: short-circuiting mount", {
-		// 	ctx_has_getSettings: !!(ctx && ctx.getSettings),
-		// 	ctx_has_setSettings: !!(ctx && ctx.setSettings)
-		// });
-		// host.innerHTML = "<div class='muted'>Flashcards temporarily disabled (hard abort).</div>";
-		// return;
-		// --- END HARD ABORT SWITCH ---
-		*/
 
 		try {
 			// Persisted (user intent only)
@@ -515,13 +501,21 @@
 				});
 			}
 
-			function toggleConfig(show) {
-				console.debug("[Flashcards] toggleConfig()", { show });
+			// NOTE: now supports { silent } to avoid stomping parsed right after Save.
+			function toggleConfig(show, { silent = false } = {}) {
+				console.debug("[Flashcards] toggleConfig()", { show, silent });
+
 				elConfig.style.display = show ? "" : "none";
-				const ui = { ...(my.ui || {}), showConfig: !!show };
-				const next = save({ ui });
-				my.ui = ui;
-				Object.assign(my, next);
+
+				const nextState = !!show;
+				const prevState = !!(my.ui && my.ui.showConfig);
+
+				my.ui = { ...(my.ui || {}), showConfig: nextState };
+
+				if (!silent && nextState !== prevState) {
+					const next = save({ ui: my.ui });
+					Object.assign(my, next);
+				}
 
 				if (show) stopTimer();
 				else restartTimer();
@@ -1035,7 +1029,8 @@
 				saveNote.textContent = "Saved.";
 				setTimeout(() => (saveNote.textContent = ""), 1000);
 
-				toggleConfig(false);
+				// IMPORTANT: close config WITHOUT another save() so we don't overwrite parsed
+				toggleConfig(false, { silent: true });
 				showingAnswer = false;
 				render();
 				restartTimer();
@@ -1045,14 +1040,12 @@
 			syncCfgInputs();
 			wireAutosave();
 
-			// IMPORTANT: honor persisted ui.showConfig WITHOUT saving from inside mount,
-			// otherwise ctx.setSettings() causes the portal to unmount+remount in a loop.
+			// Honor persisted ui.showConfig WITHOUT saving from inside mount
 			if (my.ui && my.ui.showConfig) {
 				console.debug(
 					"[Flashcards] mount() honoring persisted ui.showConfig=true without toggleConfig"
 				);
 				elConfig.style.display = "";
-				// Config is visible → timer must be stopped.
 				stopTimer();
 			}
 
@@ -1083,7 +1076,7 @@
 			};
 		} catch (err) {
 			console.error("[Flashcards] mount() FATAL", err);
-			throw err; // allow portal to see the error, but at least it's logged now
+			throw err;
 		}
 	}
 
