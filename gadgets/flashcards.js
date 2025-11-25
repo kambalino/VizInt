@@ -379,7 +379,7 @@
 							</div>
 							<span class="muted fineprint" id="fc-load-note"></span>
 						</div>
-						<div class="muted fineprint">Examples: https://kambalino.github.io/VizInt/Specs/flashcards_it_100.csv</div>
+						<div class="muted fineprint">Examples: https://kambalino.github.io/VizInt/res/flashcards_it_100.csv</div>
 						<div class="field" style="grid-template-columns:1fr;">
 							<label for="fc-csv">Paste CSV</label>
 							<textarea id="fc-csv" name="fc-csv" rows="8" placeholder='"Side A","Side B","Notes"'></textarea>
