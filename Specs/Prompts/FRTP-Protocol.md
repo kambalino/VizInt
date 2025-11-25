@@ -1,6 +1,6 @@
 # 🤝 VizInt Volk Protocol — Team & FRTP Governance
 
-### **v1.3.4 (Stable Release)**
+### **v1.3.5 (Stable Release)**
 
 *A universal communication and coordination protocol for mixed teams of AI + humans (“Volk”). Architecture-neutral.*
 
@@ -270,9 +270,26 @@ Whenever a Volk member makes **file‑wide changes** to a code or spec file:
 1. **Upsert a VERSIONING block** (increment patch/minor version).
 2. **Upsert a HISTORY block** with:
 
-   * Timestamp
+   * Timestamp [Sorted by most recent first]
+   * Version
    * Author Nickname
    * Summary of change
+
+Formatted within an appropriate multi-line comment syntax, that includes markdown escapes around the history block to additionally facilitate viewing in markdown/canvasses - such as the following block:
+
+
+/*
+```text
+2025/11/20	1.2.5	K&K & Co.	Clarified readiness semantics: Chronus.ready encapsulates all built-in
+								provider readiness; no per-provider readiness surface in v1.2. Minor
+								copy edits and structure tightening.
+2025/11/19	1.2.4	Djho		Merged old+new specs; added anchor taxonomy, pub/sub, DST clarifications,
+								provider contract, caching rules, backlog for runner/blender.
+2025/11/18	1.2.3	Lillypunter	Added Atlas pull-model contract.
+2025/11/18	1.2.2	U:Vz		Added GeoEnvelope semantics + optional geo overrides.
+2025/11/18	1.2.1	U:Ox		Initial Chronus v1.2 spec draft (public API, providers, contexts, DST).
+```
+*/
 
 If a file already contains these sections → update them.
 If not → create them at the top of the file.
