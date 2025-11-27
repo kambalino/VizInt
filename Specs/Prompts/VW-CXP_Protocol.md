@@ -1,202 +1,265 @@
-# VW-CXP v1.4.1 — Volk Workflow: Coordination & eXecution Protocol
-
-## $VER: VW-CXP 1.4.1
-
-## $HISTORY:
+# 📜 **VW-CXP — Volk Workflow: Coordination & eXecution Protocol**
 
 ```
-2025/03/27	1.4.1	Protocol refinements: ID semantics, identity boundary rule, misrouting guardrails, PAM ownership, FRTP→CXP rename, sample PAM, removal of unused priorities.
-2025/03/26	1.4.0	Initial migration of FRTP Protocol → VW-CXP.
+$VER: 1.4.5
+$HISTORY:
+2025/11/27	1.4.5	Formatting and meta-data refinements
+2025/11/27	1.4.4	Glossary + Minor Refinements
+2025/11/26	1.4.3	Restored role commentary & original schematic blocks, improved Purpose section, reinstated attachment rules, clarified FRTP paragraph (removable), added header-token constraints, refined multi-recipient rules.
+2025/11/26	1.4.2	Protocol refinements: identity boundary rule, PAM ownership, CXP rename, sequence semantics.
+2025/11/25	1.4.0	Initial FRTP → CXP migration draft.
 ```
 
 ---
 
-# 1. Purpose
+# **0. Prologue**
 
-VW-CXP defines **how Volks communicate, coordinate, review, and execute work** across the VizInt ecosystem.
-It replaces the old *FRTP* protocol with a cleaner, name-safe, evolution-friendly workflow.
+VW-CXP is the **workflow operating system** for the VizInt project.
+It defines communication, routing, execution, responsibilities, and disciplined evolution of shared assets between the participants and applies equally to participants including AI folks and human folks, referred to collectively as "Volks".
 
-All packets using this protocol are now called **CXP Packets**.
+> 📝 **Note:** The FRTP paragraph below is *removable* for future projects to avoid legacy confusion.
+
+FRTP has been fully retired and renamed. All new formal communications must use **CXP Packets**.
 
 ---
 
-# 2. CXP Packet Format
+# **1. Purpose**
 
-Each packet MUST contain the following headers:
+VW-CXP governs **how** VizInt Volks work together:
+
+* How communication flows
+* How packets are formatted and routed
+* How identity is enforced
+* How edits evolve non-destructively
+* How responsibilities are partitioned
+* How assets change safely
+* How ACK cycles and execution are triggered
+
+VW-CXP is **not** an architecture spec.
+It defines *process*, *discipline*, and *coordination* — the backbone of the VizInt development culture.
+
+---
+
+# **2. Official Volk Identity Table**
+
+| Role				| Full Name		| Alias	| Channel				|
+| ----------------- | ------------- | ----- | --------------------- |
+| Orchestrator      | Orchestrator	| U:Ox  | Project Orchestration	|
+| Architect / Owner | K&K			| K&K  	| Project Planning		|
+| Portal Runtime    | Portal		| U:Vz  | Portal Runtime		|
+| UX / Chrome       | UX Lead		| U:Ux  | UX					|
+| Gadgets Architect | Gadgematix	| U:Gx  | Plugin Design			|
+| Gadget Factory    | Factory		| U:Fx  | Gadget Factory		|
+| Chronus Subsystem	| Chronus		| U:Ch  | Chronus				|
+| Atlas Subsystem	| Atlas			| U:At  | Atlas					|
+| Code Reviewer		| TBD			| U:Rx  | TBD					|
+
+### **Role Responsibilities (Guidance)**
+
+*(These are advisory, not binding. Roles may evolve.)*
+
+* **U:Ox** — Maintains workflow integrity, routes decisions, validates packets.
+* **K&K** — System owner; provides requirements; may issue CXP Packets directly.
+* **U:Vz** — Owns runtime wiring, ctx.libs, instantiation, settings persistence.
+* **U:Ux** — Owns chrome.js visuals, badge grid, multi-instance UI logic.
+* **U:Gx** — Owns gadget design system, manifest rules, authoring guidelines.
+* **U:Fx** — Produces gadgets, spec.md, and migration work.
+* **U:Ch** — Owns Chronus providers, anchors, cursors, DST logic.
+* **U:At** — Owns Atlas pipeline and GeoEnvelope semantics.
+
+Aliases should rarely change.
+Any new identity must be introduced via a CXP Packet.
+
+---
+
+# **3. CXP Packet Header Format (Mandatory)**
 
 ```
 #ID: [Sender>Recipients:WW:NN]
 #FROM: <Alias>
 #TO: <Alias(es)>
-#SUBJECT: <Brief description>
+#SUBJECT: <Short Title>
 ```
 
-### ID Semantics (Clarified)
+### **3.1 Header-token rules**
 
-* **WW** = ISO calendar week number (01–53)
-* **NN** = sequence index issued by the **Sender** for that week (00–99)
-* The counter resets weekly **per sender**
+* `#ID:`, `#FROM:`, `#TO:`, `#SUBJECT:` **must start at column 1**
+* No preceding spaces (because preceding spaces will convert #directives in to markup syntax)
+* No trailing spaces
+* These must remain literal tokens for tooling consistency
+
+---
+
+# **4. ID Semantic Schematic (Restored)**
+
+```
+[Ox>Vz,Ux,Gx:27:04]
+ ↑  ↑        ↑  ↑
+ |  |        |  └────── Sequence number (per sender, resets weekly)
+ |  |        └───────── Calendar week (01–53)
+ |  └────────────────── Recipient list (comma-separated)
+ └───────────────────── Sender
+```
+
+Rules:
+
+* NN increments by sender
+* One sender only
+* Recipients separated by commas
+* Highest-impact recipient first
+
+---
+
+# **5. Identity Boundary Rule (Mandatory)**
+
+1. A Volk may speak **only** in its own alias.
+2. Drafts intended for another Volk must list that Volk in `#TO`.
+3. K&K may elect to use freeform messages, or CXP Packets (no restriction).
+4. Impersonating another alias is a protocol violation.
+
+---
+
+# **6. Misrouted Packet Rule (STOP-AND-FLAG)**
+
+If a packet appears intended for a different role:
+
+1. **STOP** (do not execute it).
+2. **FLAG** misrouting in a reply to U:Ox + K&K.
+3. **WAIT** for confirmation.
+
+Prevents accidental subsystem damage.
+
+---
+
+# **7. Ownership Boundaries**
+
+Volks may not modify assets outside their domain unless:
+
+* A stable public interface permits it
+* A CXP Packet explicitly grants modification rights
+* K&K authorizes temporary modification
+
+Examples:
+
+* Portal cannot modify Atlas pipeline
+* Atlas cannot alter Chronus provider logic
+* UX must not change runtime instantiation or ctx.libs wiring
+
+Ownership protects architectural clarity.
+
+---
+
+# **8. CXP Packet Structure (Canonical)**
+
+Packets must follow this order:
+
+1. **Summary**
+2. **SME Feedback**
+3. **Clarifying Questions**
+4. **Plan (Delta-first, minimal changes)**
+5. **Dependencies**
+6. **Required Actions (per recipient)**
+
+Readable. Deterministic. Diff-friendly.
+
+---
+
+# **9. Team Editing Doctrine (Non-Destructive)**
+
+### Core Principles
+
+* Delta-first editing
+* Preserve `$VER` and `$HISTORY`
+* Maintain indentation (hard tabs)
+* Use surgical tools (e.g., canmore.update_textdoc)
+* Never hallucinate missing content
+* No deleting files without explicit K&K approval
+
+### Behavior Guidance
+
+* < 10 lines → surgical update
+* > 10 lines → structured diff proposal
+* Only rewrite entire files when authorized
+
+---
+
+# **10. Attachment Discipline (Clarified)**
+
+Attachments must be included **only when required for execution**.
+
+Examples that *require* attachments:
+
+* Gadget spec updates
+* Gadget creation
+* UX behavior changes
+* API contracts
+* Any change requiring reference to prior code
+
+If required attachments are missing:
+
+```
+Blocking: Required attachment missing → <Name>.
+Please provide before execution.
+```
+
+**Never attach casually.**
+Avoid bulk attachments when a 5–7 line diff suffices.
+
+---
+
+# **11. Project Asset Manifest (Minimal, Per Owner Request)**
+
+A **sortable**, compact PAM.md listing:
+
+(Recommended: keep the PAM alphabetized by asset path for diff clarity.)
+
+
+```
+{asset path} | {description} | {owner}
+```
 
 Example:
-`[Ox>Vz,Ux,Gx:27:04]` means:
-
-* Sent by **U:Ox**
-* Delivered to **U:Vz, U:Ux, U:Gx**
-* Sent in week **27**
-* It is Ox’s **4th** packet of that week
-
----
-
-# 3. Identity Boundary Rule (Reintroduced & Corrected)
-
-**No Volk may issue CXP packets using another Volk’s alias.**
-
-### Rules:
-
-1. **A Volk speaks only in its own alias.**
-2. Drafts intended *for* another Volk must use that Volk only in the **#TO** field.
-3. **Impersonation is a protocol violation.**
-4. **K&K Clarification:**
-
-   * K&K MAY originate CXP packets when acting in a system-owner/editorial capacity.
-   * But K&K never uses a Volk alias (Ox, Vz, Ux, etc.).
-   * When K&K requests a packet, U:Ox authors it.
-
----
-
-# 4. Asset Ownership Guardrails (Reinstated)
-
-Volks must respect explicit ownership of files, assets, and code.
-
-### 4.1 Do not modify another Volk’s assets unless:
-
-* You are using an approved public interface, **OR**
-* You have received explicit CXP authorization from U:Ox or K&K.
-
-### 4.2 Misrouting Protection (Reinstated)
-
-If a packet or directive appears misrouted:
-
-1. **Pause.**
-2. **Flag the suspected misrouting** in a reply to U:Ox.
-3. **Await confirmation** before acting.
-
-This prevents runtime and UX cross-edit contamination.
-
----
-
-# 5. Editing Workflow (Tool-Agnostic Revision)
-
-When modifying existing artifacts:
-
-* Always perform **surgical edits, not wholesale rewrites**, unless explicitly authorized.
-* Use the project’s **surgical-edit mechanism** (e.g., `canmore.update_textdoc`) to maintain diff clarity.
-
-Wholesale regeneration is permitted only when:
-
-* A major version bump is requested, or
-* K&K explicitly approves it in a CXP Packet.
-
----
-
-# 6. Canonical Output Rules
-
-Each CXP response must:
-
-* Use delta-first editing
-* Include version bumps for any updated asset
-* Maintain chronological `$HISTORY` with newest-first ordering
-
-When a packet results in changes to project files, the sender MUST:
-
-1. Update the file
-2. Append a `$HISTORY` line
-3. Notify affected Volks
-
----
-
-# 7. Project Asset Manifest (PAM) — Formalized
-
-The VizInt **Project Asset Manifest (PAM.md)** is now an official part of VW-CXP.
-
-### 7.1 PAM Ownership
-
-* **Authored by:** U:Ox
-* **Approved by:** K&K
-* **Maintained by:** Relevant Volks through CXP Packets
-
-### 7.2 Required Sections in PAM.md
-
-Each entry must specify:
-
-* Asset Name
-* Owner (Volk)
-* Versioning scheme
-* Lifecycle State (active, deprecated, pending migration)
-* Relationship to other assets
-
-### 7.3 Sample Entries (Required in PAM appendix)
 
 ```
-portal.js
-	Owner: U:Vz
-	State: Active
-	Notes: Runtime wiring and ctx.libs authority
-
-chrome.js
-	Owner: U:Ux
-	State: Active
-	Notes: Exclusive owner of gadget chrome construction
-
-VizInt-Chronus-1.2.md
-	Owner: U:Ch
-	State: Active
-	Notes: Definition of Chronus v1.2 API & boundaries
+Path to Asset				| Description								| Owner Alias
+./path/portal.js			| runtime wiring, ctx.libs authority		| U:Vz
+./path/chrome.js			| chrome visuals, badge grid logic			| U:Ux
+./path/VizInt-Atlas.md		| GeoEnvelope + pipeline					| U:At
+./path/VizInt-Chronus.md	| Anchors, DST, providers					| U:Ch
+./path/registry.js			| gadget registry							| U:Vz
 ```
 
----
-
-# 8. Removal of Priority Levels
-
-The unused P1–P4 priority section has been **removed entirely** in v1.4.1.
-
-It may be reintroduced in a future version *only* with a full operational model.
+The PAM.md file is the authoritative index of system assets.  
+All Volks must keep it aligned with reality.  
+Any asset additions, removals, or ownership changes MUST be expressed via a CXP Packet.
 
 ---
 
-# 9. Multi-Recipient Packets
+# 12. Micro-Glossary (Optional)
 
-CXP supports multi-recipient routing via:
+**Volk**  
+A subsystem persona (AI or human) with defined responsibilities, identity, and ownership boundaries.
 
-```
-#TO: U:Vz, U:Ux, U:Gx
-```
+**CXP Packet**  
+The standard communication format for coordination, decisions, deltas, and routing under VW-CXP.
 
-Each recipient MUST:
+**Surgical Edit**  
+A targeted, non-destructive modification (typically <10 lines) applied using the project’s editing mechanism (e.g., canmore.update_textdoc).
 
-* ACK if required
-* Or explicitly decline responsibility
+**Delta-First Editing**  
+A protocol requirement prioritizing minimal changes, diff visibility, and preservation of `$VER` + `$HISTORY`.
 
-This replaces the old “Required Summary Table” mechanism.
+**Descriptor**  
+A structured object created by portal.js describing a gadget instance (classId, instanceId, capabilities, badges, etc.) consumed by chrome.js.
 
----
+**PAM.md**  
+Project Asset Manifest. The authoritative index of system assets and ownership, updated only via CXP Packets.
 
-# 10. FRTP → CXP Terminology Migration
 
-The protocol formerly known as **FRTP** has been fully renamed:
+* This document is normative
+* Authored by U:Ox and approved by K&K
+* Maintained collaboratively by relevant Volks  
+* All changes must follow the Team Editing Doctrine and must preserve $VER and $HISTORY.
+* Updated strictly via CXP Packets
 
-* **FRTP** → **CXP Packet**
-* **FRTP Response** → **CXP Response**
-* **FRTP Delta** → **CXP Delta**
-
-All teams must adopt this terminology effective immediately.
-
----
-
-# 11. Closing
-
-VW-CXP v1.4.1 strengthens clarity, removes ambiguity, restores essential safety rules, and aligns all Volks under a modern, reliable coordination protocol.
-
-Further enhancements will follow once PAM.md is expanded and connected formally to the Specs.
-
-END OF VW-CXP v1.4.1
+# END OF VW-CXP
