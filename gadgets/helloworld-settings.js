@@ -4,174 +4,218 @@
  * - Proper manifest with _api: "1.0"
  * - supportsSettings: true (manifest-first)
  * - onSettingsRequested: in-viewport settings UI (no modal)
- * - onInfoClick: explains use of the ⚙️ settings gear
+ * - onInfoClick: produces/toggles inline help text
  */
 
 (function () {
-  'use strict';
+	'use strict';
 
-  function escapeHtml(str) {
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
+	function escapeHtml(str) {
+		return String(str)
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;')
+			.replace(/'/g, '&#39;');
+	}
 
-  function escapeAttr(str) {
-    // basic attribute-safe escaping
-    return escapeHtml(str).replace(/`/g, '&#96;');
-  }
+	function escapeAttr(str) {
+		return escapeHtml(str).replace(/`/g, '&#96;');
+	}
 
-  const manifest = {
-    _api: '1.0',              // mandatory
-    _class: 'HelloWorld',     // logical gadget class
-    _type: 'single',          // single | multi | system
-    _id: 'Default',           // instance id within class
-    _ver: 'v0.1.0',
-    verBlurb: 'Demo gadget: configurable "Hello World" message.',
-    bidi: 'ltr',
+	const DEFAULT_MESSAGE = 'Hello World';
+	const HINT_TEXT =
+		'Use the ⚙️ settings gear in the titlebar to configure this message. ' +
+		'Click the ℹ️ icon for help if you need it.';
 
-    label: 'Hello World',
-    publisher: 'K&K',
-    contact_email: '',
-    contact_url: '',
-    contact_socials: '',
+	const manifest = {
+		_api: '1.0',              // mandatory
+		_class: 'HelloWorld',     // logical gadget class
+		_type: 'single',          // single | multi | system
+		_id: 'Default',           // instance id within class
+		_ver: 'v0.1.0',
+		verBlurb: 'Demo gadget: configurable "Hello World" message.',
+		bidi: 'ltr',
 
-    // Visual hints (optional; chrome may use these later)
-    iconEmoji: '👋',
-    iconPng: '',
-    iconBg: 'rgba(0,0,0,.2)',
-    iconBorder: '#888',
+		label: 'Hello World',
+		publisher: 'K&K',
+		contact_email: '',
+		contact_url: '',
+		contact_socials: '',
 
-    // Capabilities: none required for this demo
-    capabilities: [],
+		iconEmoji: '👋',
+		iconPng: '',
+		iconBg: 'rgba(0,0,0,.2)',
+		iconBorder: '#888',
 
-    description:
-      'Minimal demo showing how a gadget can expose settings and react to the titlebar settings gear.',
+		capabilities: [],
 
-    // v1.2 settings contract
-    supportsSettings: true
-  };
+		description:
+			'Minimal demo showing how a gadget can expose settings and react to the titlebar settings gear.',
 
-  const DEFAULT_MESSAGE = 'Hello World';
+		supportsSettings: true
+	};
 
-  // Renders the "normal" view
-  function renderView(host, ctx) {
-    // Canonical API: ctx.settings.get(key, defaultValue)
-    const msg =
-      ctx.settings && typeof ctx.settings.get === 'function'
-        ? ctx.settings.get('message', DEFAULT_MESSAGE)
-        : DEFAULT_MESSAGE;
+	// Helper: canonical get/set wrappers (primary: ctx.settings, fallback: ctx._hwMessage)
+	function getMessage(ctx) {
+		if (ctx && ctx.settings && typeof ctx.settings.get === 'function') {
+			return ctx.settings.get('message', DEFAULT_MESSAGE);
+		}
+		return ctx && ctx._hwMessage ? ctx._hwMessage : DEFAULT_MESSAGE;
+	}
 
-    host.innerHTML = [
-      '<div class="hw-root">',
-        '<p class="hw-message">', escapeHtml(msg), '</p>',
-        '<p class="hw-hint">Use the ⚙️ icon in the titlebar to configure this message.</p>',
-      '</div>'
-    ].join('');
-  }
+	function setMessage(ctx, next) {
+		if (ctx && ctx.settings && typeof ctx.settings.set === 'function') {
+			ctx.settings.set({ message: next });
+		} else if (ctx) {
+			ctx._hwMessage = next;
+		}
+	}
 
-  // Renders the settings UI into the same viewport
-  function renderSettings(body, ctx) {
-    const current =
-      ctx.settings && typeof ctx.settings.get === 'function'
-        ? ctx.settings.get('message', DEFAULT_MESSAGE)
-        : DEFAULT_MESSAGE;
+	// Render main view (message + optional hint)
+	function renderView(host, ctx) {
+		const msg = getMessage(ctx);
+		const showHint = msg === DEFAULT_MESSAGE;
 
-    body.innerHTML = [
-      '<div class="hw-settings">',
-        '<label class="hw-settings-row">',
-          '<span class="hw-settings-label">Message:</span>',
-          '<input type="text" class="hw-settings-input" value="', escapeAttr(current), '" />',
-        '</label>',
-        '<div class="hw-settings-actions">',
-          '<button type="button" class="hw-btn hw-btn-save">✓ Save</button>',
-          '<button type="button" class="hw-btn hw-btn-cancel">✖ Cancel</button>',
-        '</div>',
-        '<p class="hw-settings-note">',
-          'Edit the message, then click “Save” to apply changes or “Cancel” to discard them.',
-        '</p>',
-      '</div>'
-    ].join('');
+		const parts = [
+			'<div class="hw-root">',
+				'<p class="hw-message">', escapeHtml(msg), '</p>'
+		];
 
-    const input     = body.querySelector('.hw-settings-input');
-    const btnSave   = body.querySelector('.hw-btn-save');
-    const btnCancel = body.querySelector('.hw-btn-cancel');
+		if (showHint) {
+			parts.push(
+				'<p class="hw-hint">',
+					escapeHtml(HINT_TEXT),
+				'</p>'
+			);
+		}
 
-    if (input) {
-      input.focus();
-      input.select();
-    }
+		parts.push('</div>');
 
-    if (btnSave && input) {
-      btnSave.addEventListener('click', function () {
-        const next = input.value;
+		host.innerHTML = parts.join('');
+	}
 
-        if (ctx.settings && typeof ctx.settings.set === 'function') {
-          // Assumes ctx.settings.set merges the patch into existing settings
-          ctx.settings.set({ message: next });
-        }
+	// Render settings UI (same viewport), with input + buttons on one row
+	function renderSettings(body, ctx, shell) {
+		const current = getMessage(ctx);
 
-        // Return to main view with updated message
-        renderView(body, ctx);
-      });
-    }
+		body.innerHTML = [
+			'<div class="hw-settings settings-compact">',
+				'<div class="hw-settings-row" ',
+					'style="display:flex;align-items:center;gap:6px;">',
+					'<span class="hw-settings-label">Message:</span>',
+					'<input type="text" class="hw-settings-input" ',
+						'style="flex:1 1 auto;min-width:0;padding:4px 6px;font-size:1rem;" ',
+						'value="', escapeAttr(current), '" />',
+					'<button type="button" ',
+						'class="gbtn gbtn-xs hw-btn-save" ',
+						'title="Save">',
+						'✅',
+					'</button>',
+					'<button type="button" ',
+						'class="gbtn gbtn-xs hw-btn-cancel" ',
+						'title="Cancel">',
+						'✖',
+					'</button>',
+				'</div>',
+				'<p class="hw-settings-note">',
+					'Edit the message, then click ✅ to apply changes or ✖ to discard them.',
+				'</p>',
+			'</div>'
+		].join('');
 
-    if (btnCancel) {
-      btnCancel.addEventListener('click', function () {
-        // Discard edits and return to main view
-        renderView(body, ctx);
-      });
-    }
-  }
+		const input     = body.querySelector('.hw-settings-input');
+		const btnSave   = body.querySelector('.hw-btn-save');
+		const btnCancel = body.querySelector('.hw-btn-cancel');
 
-  const api = {
-    manifest,
+		if (input) {
+			input.focus();
+			input.select();
+		}
 
-    mount(host, ctx) {
-      // Initial render of the main view
-      renderView(host, ctx);
+		function getViewHost() {
+			if (shell && shell.body) return shell.body;
+			if (ctx && ctx.host) return ctx.host;
+			return body;
+		}
 
-      // Simple unmount: clear the host contents
-      return function () {
-        host.innerHTML = '';
-      };
-    },
+		if (btnSave && input) {
+			btnSave.addEventListener('click', function () {
+				const next = input.value;
+				setMessage(ctx, next);
+				renderView(getViewHost(), ctx);
+			});
+		}
 
-    // Called by Portal when the settings gear is activated (per v1.2 contract)
-    onSettingsRequested(ctx, shell) {
-      // shell: { slot, body, ... } — we care about body only
-      // We deliberately do NOT mutate ctx; we treat shell.body as the active viewport.
-      if (!shell || !shell.body) return;
-      renderSettings(shell.body, ctx);
-    },
+		if (btnCancel) {
+			btnCancel.addEventListener('click', function () {
+				renderView(getViewHost(), ctx);
+			});
+		}
+	}
 
-    // Called by chrome when the info icon is clicked
-    onInfoClick(ctx, shell) {
-      void shell; // unused in this simple example
-      try {
-        alert(
-          [
-            'Hello World Gadget',
-            '',
-            '- The main view shows a configurable greeting.',
-            '- Use the ⚙️ settings gear in the titlebar to change the message.',
-            '- This example demonstrates the v1.2 settings contract.'
-          ].join('\n')
-        );
-      } catch {
-        // no-op in restricted environments
-      }
-    },
+	const api = {
+		manifest,
 
-    // Simple text fallback for environments that only look at api.info
-    info: 'Demo gadget showing configurable "Hello World" text via the v1.2 settings gear.'
-  };
+		mount(host, ctx) {
+			// Store host on ctx so settings/views have a canonical anchor if needed
+			if (ctx && typeof ctx === 'object') {
+				ctx.host = host;
+			}
 
-  window.GADGETS = window.GADGETS || {};
-  // Register under the runtime ID used by registry.js
-  window.GADGETS['helloworld-settings'] = api;
+			renderView(host, ctx);
+
+			return function unmount() {
+				// --------------------------------------------------------
+				// UNMOUNT EXPLANATION:
+				// All event listeners live on nodes under `host`.
+				// Clearing host.innerHTML removes those nodes entirely,
+				// so listeners + closures become eligible for GC.
+				// --------------------------------------------------------
+				host.innerHTML = '';
+			};
+		},
+
+		// Called when the settings gear is activated
+		onSettingsRequested(ctx, shell) {
+			if (!shell || !shell.body) return;
+			renderSettings(shell.body, ctx, shell);
+		},
+
+		// Called when the ℹ️ icon is clicked (once chrome wiring is fixed)
+		onInfoClick(ctx, shell) {
+			const host =
+				(shell && shell.body) ||
+				(ctx && ctx.host) ||
+				null;
+
+			if (!host) {
+				// Fallback: basic alert if we can't locate the DOM root
+				try {
+					alert(HINT_TEXT);
+				} catch {
+					/* no-op */
+				}
+				return;
+			}
+
+			let hint = host.querySelector('.hw-hint');
+			if (!hint) {
+				hint = document.createElement('p');
+				hint.className = 'hw-hint';
+				hint.textContent = HINT_TEXT;
+				host.appendChild(hint);
+			} else {
+				// Toggle visibility
+				const hidden = hint.style.display === 'none';
+				hint.style.display = hidden ? '' : 'none';
+			}
+		},
+
+		info: 'Demo gadget showing configurable "Hello World" text via the v1.2 settings gear.'
+	};
+
+	window.GADGETS = window.GADGETS || {};
+	window.GADGETS['helloworld-settings'] = api;
 
 })();
