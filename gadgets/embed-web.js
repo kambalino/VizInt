@@ -1,59 +1,99 @@
-(function () {
-	const GID = 'EmbedWeb';
-
-	// --- History ---------------------------------------------------------
+/*
+ *
+ *  $VER: EmbedWeb 1.2.1
+ * 
+ *  ///! MERGE HISTORIES BELOW
+ * 
+ *  $HISTORY:
+ *  	2025/11/30 1.2.1	Converted to multi-instance gadget, v1.2 manifest, Settings-driven URL config (U:Fx)
+ *  	2025/10/01 0.3.6	Debug checkbox in popover; debugColors persisted in settings (U:Vz)
+ * 
+ * 	// --- History ---------------------------------------------------------
 	// v0.3.0  Basic Embed Web gadget (URL + iframe).
 	// v0.3.2  Added buffer margin + toolbar refinements.
 	// v0.3.3  Introduced debug rainbow colors + zoom diagnostics.
 	// v0.3.4  Flex + min-height fix to stop handle collapsing at high zoom.
 	// v0.3.5  Clean build: subtle colors, slimmer chrome, optional debug mode.
 	// v0.3.6  Debug checkbox in popover; debugColors persisted in settings.
+ *
+ */
+
+(function () {
+	// ---------------------------------------------------------------------
+	// Defaults & helpers
 	// ---------------------------------------------------------------------
 
 	// Default for new instances; settings.debugColors overrides this.
 	const DEBUG_COLORS = false;
 
-	// --- VizInt v1.0 manifest (per your schema) ---
+	function createSettingsAdapter(ctx, fallbackRoot) {
+		const read = () => {
+			if (ctx && typeof ctx.getSettings === "function") {
+				return ctx.getSettings() || {};
+			}
+			if (fallbackRoot && fallbackRoot.__settings) {
+				return fallbackRoot.__settings;
+			}
+			return {};
+		};
+		const write = (next) => {
+			if (ctx && typeof ctx.setSettings === "function") {
+				ctx.setSettings(next);
+			} else if (fallbackRoot) {
+				fallbackRoot.__settings = next;
+			}
+		};
+		return {
+			get() {
+				return read();
+			},
+			set(partial) {
+				const current = read();
+				write({ ...current, ...partial });
+			},
+		};
+	}
+
+	// ---------------------------------------------------------------------
+	// VizInt v1.2.x Gadget Manifest (API 1.0)
+	// ---------------------------------------------------------------------
+
 	const manifest = {
 		_api: "1.0",
-		_class: "EmbedWeb",
-		_type: "singleton",
-		_id: "EmbedWeb",
-		_ver: "v0.3.6",
-		label: "Embed Web",
+		_class: "EmbedWeb",          // canonical class identity (Portal will normalize)
+		_type: "multi",              // multi-instance gadget
+		_id: "default",              // internal variant id (kept simple for now)
+		_ver: "v1.2.1",
+		label: "Custom Embed",
 		iconEmoji: "🌐",
-		capabilities: ["network"],
 		description:
-			"Embed external web content via <iframe>. Hover the very top edge to reveal a tiny toolbar (✏️ Edit / 🔄 Refresh / 🔗 Open).",
+			"Embed external web content via <iframe>. Configure the URL via the gadget’s Settings (gear). Hover the very top edge to reveal a tiny toolbar (✏️ Edit / 🔄 Refresh / 🔗 Open); multiple instances are supported.",
+		capabilities: ["network"],
+		supportsSettings: true,
+		// badges: [] // (optional; Portal will derive badges from capabilities)
 	};
 
+	// ---------------------------------------------------------------------
+	// Registration under manifest._class (Portal will re-key by normalized classId)
+	// ---------------------------------------------------------------------
+
 	window.GADGETS = window.GADGETS || {};
-	window.GADGETS[GID] = {
+	window.GADGETS[manifest._class] = {
 		manifest,
 		info: manifest.description,
 		mount,
 		unmount,
-		onInfoClick
+		onInfoClick,
+		onSettingsRequested,
 	};
 
-	function mount(root, ctx) {
-		// --- settings helper: { url, bufferPx, debugColors } ---
-		const S = (() => {
-			const read = () =>
-				(ctx && typeof ctx.getSettings === "function")
-					? (ctx.getSettings() || {})
-					: (root.__settings || {});
-			const write = (next) => {
-				if (ctx && typeof ctx.setSettings === "function") ctx.setSettings(next);
-				else root.__settings = next;
-			};
-			return {
-				get() { return read(); },
-				set(partial) { write({ ...read(), ...partial }); },
-			};
-		})();
+	// ---------------------------------------------------------------------
+	// mount / unmount
+	// ---------------------------------------------------------------------
 
-		// --- DOM scaffold ---
+	function mount(root, ctx) {
+		const S = createSettingsAdapter(ctx, root);
+
 		root.innerHTML = "";
 		root.classList.add("vi-embedweb");
 
@@ -113,39 +153,13 @@
 			}
 			.vi-ew-toolbtn:hover { background: rgba(0,0,0,.06); }
 
-			/* Popover: URL + buffer dropdown + debug checkbox */
-			.vi-ew-pop {
-				position: absolute; z-index: 20; top: 8px; left: 8px;
-				display: none; padding: 6px; border: 1px solid #ccc; border-radius: 6px;
-				background: var(--vi-panel, #fff); box-shadow: 0 2px 6px rgba(0,0,0,.12);
-				font-size: 12px;
-			}
-			.vi-ew-pop.show { display: block; }
-			.vi-ew-pop form { display: flex; flex-direction: column; gap: 4px; }
-
-			.vi-ew-input {
-				width: 320px; max-width: 62vw; height: 22px; padding: 0 6px;
-				border: 1px solid #ccc; border-radius: 4px; font-size: 12px;
-			}
-			.vi-ew-row {
-				display: flex; align-items: center; gap: 4px;
-			}
-			.vi-ew-row label { white-space: nowrap; font-size: 11px; }
-			.vi-ew-buffer-select {
-				height: 22px;
-				font-size: 11px;
-			}
-			.vi-ew-debug-check {
-				width: 14px; height: 14px;
-			}
-
 			/* Iframe panel; extra whitespace buffer is applied as margin-top on this */
 			.vi-ew-body { position: relative; z-index: 1; }
 			.vi-ew-iframe {
 				width: 100%; height: 460px; border: 0; display: block;
 				background: #fff; position: relative; z-index: 1;
 			}
-			/* While tools are open, prevent iframe from eating pointer events */
+			/* While tools are open (e.g., during hover), prevent iframe from eating pointer events */
 			.vi-embedweb.tools-open .vi-ew-iframe {
 				pointer-events: none;
 			}
@@ -166,7 +180,7 @@
 				font-size: 12px; color: #555; padding: 8px 6px;
 			}
 
-			/* Debug rainbow mode (opt-in via debug checkbox / DEBUG_COLORS) */
+			/* Debug rainbow mode (opt-in via Settings) */
 			.vi-embedweb.debug .vi-ew-handle {
 				background: red !important;
 			}
@@ -182,52 +196,13 @@
 		`;
 		root.appendChild(css);
 
-		// Handle bar + centered toolbar
+		// Handle bar + centered toolbar (now only Refresh / Open; editing is via Settings)
 		const handle = el("div", "vi-ew-handle");
 		const tools = el("div", "vi-ew-tools");
-		const tEdit = btn("✏️", "Edit URL & buffer");
 		const tRefresh = btn("🔄", "Refresh");
 		const tOpen = btn("🔗", "Open in new tab");
-		tools.append(tEdit, tRefresh, tOpen);
+		tools.append(tRefresh, tOpen);
 		handle.appendChild(tools);
-
-		// Popover: URL + buffer dropdown + debug checkbox
-		const pop = el("div", "vi-ew-pop");
-		const form = el("form");
-
-		const urlInput = el("input", "vi-ew-input", {
-			type: "text",
-			placeholder: "Paste a URL (http/https/file) and press Enter",
-		});
-
-		const settingsRow = el("div", "vi-ew-row");
-		const bufferLabel = el("label", "", null, "Toolbar buffer:");
-		const bufferSelect = el("select", "vi-ew-buffer-select");
-		[0, 2, 4, 6, 8, 12].forEach((v) => {
-			const opt = document.createElement("option");
-			opt.value = String(v);
-			opt.textContent = v + " px";
-			bufferSelect.appendChild(opt);
-		});
-		settingsRow.append(bufferLabel, bufferSelect);
-
-		const debugRow = el("div", "vi-ew-row");
-		const debugChk = el("input", "vi-ew-debug-check", {
-			type: "checkbox",
-			id: "vi-ew-debug-toggle"
-		});
-		const debugLabel = el("label", "", { for: "vi-ew-debug-toggle" }, "Debug colors (rainbow)");
-		debugRow.append(debugChk, debugLabel);
-
-		const buttonsRow = el("div", "vi-ew-row");
-		const bSave = btn("Save", "Save URL & buffer");
-		bSave.type = "submit";
-		const bCancel = btn("Cancel", "Cancel");
-		bCancel.type = "button";
-		buttonsRow.append(bSave, bCancel);
-
-		form.append(urlInput, settingsRow, debugRow, buttonsRow);
-		pop.appendChild(form);
 
 		// Iframe body + error chip
 		const body = el("div", "vi-ew-body");
@@ -241,30 +216,30 @@
 		);
 		body.append(iframe, errorChip);
 
-		const hint = el("div", "vi-ew-hint", null,
-			"No URL saved. Hover the very top edge to reveal the tiny toolbar, then click ✏️ to set one. Example: https://example.com or file:///C:/path/to/local.html"
+		const hint = el(
+			"div",
+			"vi-ew-hint",
+			null,
+			"No URL saved. Use the gadget’s Settings (gear icon) to configure an embed URL. Example: https://example.com or file:///C:/path/to/local.html"
 		);
 
-		root.append(handle, pop, body, hint);
+		root.append(handle, body, hint);
 
 		// --- expand/collapse helpers ---
 		let collapseTimer = null;
 
 		const isExpanded = () => handle.classList.contains("expanded");
 
-		// apply buffer whitespace (uses gadget settings)
 		const applyBuffer = () => {
 			const s = S.get() || {};
 			const buf = typeof s.bufferPx === "number" ? s.bufferPx : 3; // slightly slimmer default
-			bufferSelect.value = String(buf);
 			body.style.marginTop = buf ? buf + "px" : "0px";
 		};
 
-		// apply debug rainbow mode
 		const applyDebug = () => {
 			const s = S.get() || {};
-			const saved = (typeof s.debugColors === "boolean") ? s.debugColors : undefined;
-			const dbg = (saved !== undefined) ? saved : DEBUG_COLORS;
+			const saved = typeof s.debugColors === "boolean" ? s.debugColors : undefined;
+			const dbg = saved !== undefined ? saved : DEBUG_COLORS;
 			if (dbg) root.classList.add("debug");
 			else root.classList.remove("debug");
 		};
@@ -311,42 +286,14 @@
 			toggleBar(true); // explicit click → stay open
 		});
 
-		// Popover interactions
-		tEdit.addEventListener("click", () => {
-			const s = S.get() || {};
-			urlInput.value = s.url || "";
-			const buf = typeof s.bufferPx === "number" ? s.bufferPx : 3;
-			bufferSelect.value = String(buf);
-
-			const savedDbg = (typeof s.debugColors === "boolean") ? s.debugColors : undefined;
-			const dbg = (savedDbg !== undefined) ? savedDbg : root.classList.contains("debug");
-			debugChk.checked = !!dbg;
-
-			pop.classList.add("show");
-			setTimeout(() => urlInput.focus(), 0);
-		});
-
-		bCancel.addEventListener("click", () => pop.classList.remove("show"));
-
-		form.addEventListener("submit", (e) => {
-			e.preventDefault();
-			const url = (urlInput.value || "").trim();
-			const bufferPx = parseInt(bufferSelect.value, 10) || 0;
-			const debugColors = !!debugChk.checked;
-
-			S.set({ url, bufferPx, debugColors });
-			pop.classList.remove("show");
-			applyBuffer();
-			applyDebug();
-			render(url);
-		});
-
 		// Refresh / open / error link
 		tRefresh.addEventListener("click", () => {
 			const url = (S.get().url || "").trim();
 			if (url) {
 				iframe.src = "";
-				requestAnimationFrame(() => { iframe.src = url; });
+				requestAnimationFrame(() => {
+					iframe.src = url;
+				});
 			}
 		});
 
@@ -389,8 +336,12 @@
 			iframe.src = url;
 		}
 
-		function showError() { errorChip.classList.add("show"); }
-		function hideError() { errorChip.classList.remove("show"); }
+		function showError() {
+			errorChip.classList.add("show");
+		}
+		function hideError() {
+			errorChip.classList.remove("show");
+		}
 
 		function el(tag, cls, attrs, text) {
 			const x = document.createElement(tag);
@@ -407,8 +358,12 @@
 
 		// per-instance teardown with timer cleanup
 		root.__vi_unmount = () => {
-			try { clearTimeout(collapseTimer); } catch {}
-			try { delete root.__api; } catch {}
+			try {
+				clearTimeout(collapseTimer);
+			} catch {}
+			try {
+				delete root.__api;
+			} catch {}
 			root.innerHTML = "";
 			delete root.__vi_unmount;
 		};
@@ -422,9 +377,127 @@
 	// Title-bar icon click → open/close toolbar
 	function onInfoClick(ctx, { body }) {
 		try {
-			body && body.__api && typeof body.__api.toggleBar === "function" && body.__api.toggleBar(true);
+			body &&
+				body.__api &&
+				typeof body.__api.toggleBar === "function" &&
+				body.__api.toggleBar(true);
 		} catch (e) {
 			// if this fails, loader will show legacy Info dialog instead
 		}
+	}
+
+	// ---------------------------------------------------------------------
+	// Settings Panel (gear icon) — URL / buffer / debug
+	// ---------------------------------------------------------------------
+
+	function onSettingsRequested(ctx, shell) {
+		const S = createSettingsAdapter(ctx);
+		const current = S.get() || {};
+		const host = (shell && (shell.body || shell.slot)) || null;
+		if (!host) return;
+
+		host.innerHTML = "";
+
+		const form = document.createElement("form");
+		form.className = "vi-ew-settings";
+
+		// URL row
+		const urlRow = document.createElement("div");
+		urlRow.style.display = "flex";
+		urlRow.style.flexDirection = "column";
+		urlRow.style.gap = "2px";
+		urlRow.style.marginBottom = "6px";
+
+		const urlLabel = document.createElement("label");
+		urlLabel.textContent = "Embed URL";
+		urlLabel.style.fontSize = "11px";
+
+		const urlInput = document.createElement("input");
+		urlInput.type = "text";
+		urlInput.value = current.url || "";
+		urlInput.placeholder = "https://example.com or file:///C:/path/to/local.html";
+		urlInput.style.width = "100%";
+		urlInput.style.boxSizing = "border-box";
+
+		urlRow.appendChild(urlLabel);
+		urlRow.appendChild(urlInput);
+
+		// Buffer row
+		const bufferRow = document.createElement("div");
+		bufferRow.style.display = "flex";
+		bufferRow.style.alignItems = "center";
+		bufferRow.style.gap = "4px";
+		bufferRow.style.marginBottom = "6px";
+
+		const bufferLabel = document.createElement("label");
+		bufferLabel.textContent = "Toolbar buffer (px):";
+		bufferLabel.style.fontSize = "11px";
+		bufferLabel.style.whiteSpace = "nowrap";
+
+		const bufferSelect = document.createElement("select");
+		bufferSelect.style.fontSize = "11px";
+		[0, 2, 4, 6, 8, 12].forEach((v) => {
+			const opt = document.createElement("option");
+			opt.value = String(v);
+			opt.textContent = v + " px";
+			bufferSelect.appendChild(opt);
+		});
+		const currentBuf = typeof current.bufferPx === "number" ? current.bufferPx : 3;
+		bufferSelect.value = String(currentBuf);
+
+		bufferRow.appendChild(bufferLabel);
+		bufferRow.appendChild(bufferSelect);
+
+		// Debug row
+		const debugRow = document.createElement("div");
+		debugRow.style.display = "flex";
+		debugRow.style.alignItems = "center";
+		debugRow.style.gap = "4px";
+		debugRow.style.marginBottom = "8px";
+
+		const debugChk = document.createElement("input");
+		debugChk.type = "checkbox";
+		debugChk.id = "vi-ew-debug-toggle-settings";
+		debugChk.checked =
+			typeof current.debugColors === "boolean"
+				? current.debugColors
+				: DEBUG_COLORS;
+
+		const debugLabel = document.createElement("label");
+		debugLabel.textContent = "Debug colors (rainbow)";
+		debugLabel.htmlFor = debugChk.id;
+		debugLabel.style.fontSize = "11px";
+
+		debugRow.appendChild(debugChk);
+		debugRow.appendChild(debugLabel);
+
+		// Save row
+		const buttonsRow = document.createElement("div");
+		buttonsRow.style.display = "flex";
+		buttonsRow.style.justifyContent = "flex-end";
+		buttonsRow.style.gap = "6px";
+
+		const saveBtn = document.createElement("button");
+		saveBtn.type = "submit";
+		saveBtn.textContent = "Save";
+
+		buttonsRow.appendChild(saveBtn);
+
+		form.appendChild(urlRow);
+		form.appendChild(bufferRow);
+		form.appendChild(debugRow);
+		form.appendChild(buttonsRow);
+
+		form.addEventListener("submit", (e) => {
+			e.preventDefault();
+			const url = (urlInput.value || "").trim();
+			const bufferPx = parseInt(bufferSelect.value, 10) || 0;
+			const debugColors = !!debugChk.checked;
+
+			S.set({ url, bufferPx, debugColors });
+			// Portal is responsible for re-mounting or re-rendering with updated settings.
+		});
+
+		host.appendChild(form);
 	}
 })();
