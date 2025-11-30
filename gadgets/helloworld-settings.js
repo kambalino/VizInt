@@ -1,207 +1,240 @@
+/* helloworld-settings.js
+ *
+ * Demo gadget for v1.2:
+ * - Proper manifest with _api: "1.0"
+ * - supportsSettings: true (manifest-first)
+ * - onSettingsRequested: in-viewport settings UI (no modal)
+ * - onInfoClick: produces/toggles inline help text
+ */
+// $VER: HelloWorld v1.2.0 (2025-11-29)
+// $HISTORY:
+// - 2025-11-29: Canonical v1.2 HelloWorld gadget with inline settings + info help (U:Gx)
+
 (function () {
-  "use strict";
+	'use strict';
 
-  /** ------------------------------------------------------------------
-   *  Manifest — canonical identity & metadata
-   *  ------------------------------------------------------------------ */
-  const manifest = {
-    _api: "1.0",
-    _class: "HelloWorld",        // canonical class identity
-    _type: "single",             // single-instance gadget
-    _id: "default",
-    _ver: "v1.2.0",
+	// --- Constants ---------------------------------------------------------
+	const DEFAULT_MESSAGE = "Hello World";
 
-    label: "Hello World",
-    description: "Demonstrates v1.2 settings-gear and info icon for a simple greeting.",
-    supportsSettings: true,
-    capabilities: [],            // no Atlas/Chronus/etc. in this minimal sample
+	// --- Manifest (API 1.0, manifest-first) -------------------------------
+	const manifest = {
+		_api: "1.0",
+		_class: "HelloWorld",   // canonical identity (Portal will normalize)
+		_type: "single",
+		_id: "default",
+		_ver: "v1.2.0",
 
-    // Optional, but recommended for richer info-modal experiences:
-    verBlurb: "Initial v1.2 template: settings gear + inline settings + info affordance.",
-    publisher: "VizInt Gx",
-    contact: "gadget-author@example.invalid"
-  };
+		label: "Hello World",
+		bidi: "ltr",
 
-  /** ------------------------------------------------------------------
-   *  Fallback info string (used if onInfoClick not wired, or as text-only fallback)
-   *  ------------------------------------------------------------------ */
-  const info = "HelloWorld shows a configurable greeting. Use the ⚙️ button to change the message.";
+		supportsSettings: true,
+		capabilities: [],
 
-  /** ------------------------------------------------------------------
-   *  Internal helper: render main view
-   *  ------------------------------------------------------------------ */
-  function renderView(host, message, helpText) {
-    host.innerHTML = "";
+		description: "Demo gadget showing a configurable greeting via the v1.2 settings gear.",
+		verBlurb: "Reference Hello World gadget for API 1.0 with settings + info.",
+		publisherLabel: "VizInt Core",
+		publisherContact: "core@vizint.local"
+	};
 
-    const container = document.createElement("div");
-    container.className = "g-helloworld";
+	// --- Helpers -----------------------------------------------------------
+	function getDom(ctx) {
+		return ctx && ctx._helloWorld && ctx._helloWorld.dom || null;
+	}
 
-    const msgEl = document.createElement("div");
-    msgEl.className = "g-helloworld-message";
-    msgEl.textContent = message;
+	function getMessage(ctx) {
+		// Prefer the portal settings wrapper if available
+		if (ctx && ctx.settings && typeof ctx.settings.get === "function") {
+			return ctx.settings.get("message", DEFAULT_MESSAGE);
+		}
+		// Fallback: in-memory only (still useful in a harness)
+		if (ctx && ctx._helloWorld && typeof ctx._helloWorld.message === "string") {
+			return ctx._helloWorld.message;
+		}
+		return DEFAULT_MESSAGE;
+	}
 
-    container.appendChild(msgEl);
+	function setMessage(ctx, value) {
+		var next = value;
+		if (!next || !next.trim) {
+			next = DEFAULT_MESSAGE;
+		}
+		next = next.trim() || DEFAULT_MESSAGE;
 
-    if (helpText) {
-      const helpEl = document.createElement("div");
-      helpEl.className = "g-helloworld-help muted";
-      helpEl.textContent = helpText;
-      container.appendChild(helpEl);
-    }
+		if (ctx && ctx.settings && typeof ctx.settings.set === "function") {
+			ctx.settings.set({ message: next });
+		} else {
+			ctx._helloWorld = ctx._helloWorld || {};
+			ctx._helloWorld.message = next;
+		}
+	}
 
-    host.appendChild(container);
-  }
+	function renderView(ctx) {
+		var dom = getDom(ctx);
+		if (!dom) return;
 
-  /** ------------------------------------------------------------------
-   *  mount(host, ctx)
-   *  ------------------------------------------------------------------ */
-  function mount(host, ctx) {
-    const get = ctx.settings?.get || (() => ({}));
-    const stored = get() || {};
-    const message = stored.message || "Hello World!";
+		var msg = getMessage(ctx);
+		if (dom.messageEl) {
+			dom.messageEl.textContent = msg;
+		}
 
-    // Remember host & simple state so settings callbacks can reuse them
-    ctx.host = host;
-    ctx.state = {
-      message,
-      helpVisible: !stored.message   // show help only until user customizes
-    };
+		// Hint behavior:
+		// - If message is the default → show a small “use ⚙️ to edit” hint.
+		// - If message is customized → hide hint unless info is explicitly requested.
+		if (dom.hintEl) {
+			if (!msg || msg === DEFAULT_MESSAGE) {
+				dom.hintEl.textContent = "Use ⚙️ in the titlebar to change this greeting.";
+				dom.hintEl.style.display = "block";
+			} else {
+				dom.hintEl.textContent = "";
+				dom.hintEl.style.display = "none";
+			}
+		}
+	}
 
-    const helpText = ctx.state.helpVisible
-      ? "Use the ⚙️ button in the title bar to change this greeting."
-      : "";
+	function closeSettingsPanel(dom) {
+		if (!dom || !dom.settingsEl) return;
+		dom.settingsEl.style.display = "none";
+		dom.settingsEl.innerHTML = "";
+	}
 
-    renderView(host, message, helpText);
+	// --- API: mount -------------------------------------------------------
+	function mount(host, ctx) {
+		// Canonical pattern: store host on ctx so settings/info can reuse it
+		ctx.host = host;
 
-    // Return unmount for cleanup
-    return function unmount() {
-      // Canonical pattern: clear our DOM; Portal will remove the slot.
-      host.innerHTML = "";
-    };
-  }
+		host.innerHTML = (
+			'<div class="vzg-helloworld">' +
+				'<div data-role="message" class="hw-message"></div>' +
+				'<div data-role="hint" class="hw-hint"></div>' +
+				'<div data-role="settings" class="hw-settings" style="display:none;"></div>' +
+			'</div>'
+		);
 
-  /** ------------------------------------------------------------------
-   *  onSettingsRequested(ctx, shell)
-   *  ------------------------------------------------------------------ */
-  function onSettingsRequested(ctx, shell) {
-    const host = ctx.host;
-    if (!host) {
-      // Defensive: if mount hasn't run or Portal is miswired
-      return;
-    }
+		var root = host.firstElementChild;
+		var dom = {
+			root: root,
+			messageEl: root.querySelector('[data-role="message"]'),
+			hintEl: root.querySelector('[data-role="hint"]'),
+			settingsEl: root.querySelector('[data-role="settings"]')
+		};
 
-    const get = ctx.settings?.get || (() => ({}));
-    const set = ctx.settings?.set || (() => {});
+		ctx._helloWorld = ctx._helloWorld || {};
+		ctx._helloWorld.dom = dom;
 
-    const current = (ctx.state && ctx.state.message) ||
-                    (get().message) ||
-                    "Hello World!";
+		// Initial render from settings
+		renderView(ctx);
 
-    const body = shell.body;
-    body.innerHTML = "";
+		// Canonical cleanup: unmount returns a disposer for Portal to call
+		return function unmount() {
+			if (ctx && ctx._helloWorld) {
+				ctx._helloWorld.dom = null;
+			}
+			if (host) {
+				host.innerHTML = "";
+			}
+			if (ctx && ctx.host === host) {
+				ctx.host = null;
+			}
+		};
+	}
 
-    const wrapper = document.createElement("div");
-    wrapper.className = "g-helloworld-settings inline-form";
+	// --- API: onSettingsRequested ----------------------------------------
+	function onSettingsRequested(ctx, shell) {
+		var dom = getDom(ctx);
+		if (!dom || !dom.settingsEl) return;
 
-    const label = document.createElement("label");
-    label.textContent = "Greeting:";
-    label.className = "g-label";
+		var settingsEl = dom.settingsEl;
+		var current = getMessage(ctx);
 
-    const input = document.createElement("input");
-    input.type = "text";
-    input.className = "g-input";
-    input.value = current;
+		settingsEl.innerHTML = "";
+		settingsEl.style.display = "block";
 
-    // Controls container (inline with input)
-    const controls = document.createElement("span");
-    controls.className = "g-controls";
+		// Row container keeps everything on one line (subject to CSS)
+		var row = document.createElement("div");
+		row.className = "hw-settings-row";
 
-    const btnSave = document.createElement("button");
-    btnSave.className = "gbtn gbtn-small";
-    btnSave.title = "Save";
-    btnSave.textContent = "✓";
+		var input = document.createElement("input");
+		input.type = "text";
+		input.value = current;
+		input.className = "hw-input";
 
-    const btnCancel = document.createElement("button");
-    btnCancel.className = "gbtn gbtn-small";
-    btnCancel.title = "Cancel";
-    btnCancel.textContent = "✖";
+		var btnSave = document.createElement("button");
+		btnSave.type = "button";
+		btnSave.className = "gbtn gbtn-sm";
+		btnSave.textContent = "✔"; // keep checkmark per U:Ox preference
 
-    controls.appendChild(btnSave);
-    controls.appendChild(btnCancel);
+		var btnCancel = document.createElement("button");
+		btnCancel.type = "button";
+		btnCancel.className = "gbtn gbtn-sm";
+		btnCancel.textContent = "✖";
 
-    // Inline layout: [Label] [Input][Buttons]
-    const row = document.createElement("div");
-    row.className = "g-row";
-    row.appendChild(label);
-    row.appendChild(input);
-    row.appendChild(controls);
+		row.appendChild(input);
+		row.appendChild(btnSave);
+		row.appendChild(btnCancel);
+		settingsEl.appendChild(row);
 
-    wrapper.appendChild(row);
-    body.appendChild(wrapper);
+		function doSave() {
+			setMessage(ctx, input.value);
+			renderView(ctx);
+			closeSettingsPanel(dom);
+		}
 
-    // Live preview (optional): update main view as user types, before commit
-    input.addEventListener("input", () => {
-      const nextMsg = input.value || "Hello World!";
-      ctx.state.message = nextMsg;
-      ctx.state.helpVisible = false;
-      renderView(host, nextMsg, "");
-    });
+		function doCancel() {
+			closeSettingsPanel(dom);
+		}
 
-    function commitAndClose() {
-      const nextMsg = input.value || "Hello World!";
-      set({ message: nextMsg });
-      ctx.state.message = nextMsg;
-      ctx.state.helpVisible = false;
-      renderView(host, nextMsg, "");
-      body.innerHTML = ""; // shrink settings UI when done
-    }
+		btnSave.onclick = function () {
+			doSave();
+		};
 
-    function cancelAndClose() {
-      // Re-render prior state
-      const msg = ctx.state.message || current;
-      const helpText = ctx.state.helpVisible
-        ? "Use the ⚙️ button in the title bar to change this greeting."
-        : "";
-      renderView(host, msg, helpText);
-      body.innerHTML = "";
-    }
+		btnCancel.onclick = function () {
+			doCancel();
+		};
 
-    btnSave.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      commitAndClose();
-    });
+		input.onkeydown = function (ev) {
+			if (ev.key === "Enter") {
+				ev.preventDefault();
+				doSave();
+			} else if (ev.key === "Escape") {
+				ev.preventDefault();
+				doCancel();
+			}
+		};
 
-    btnCancel.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      cancelAndClose();
-    });
-  }
+		// Focus after render so the user can type immediately
+		setTimeout(function () {
+			try { input.focus(); } catch (e) {}
+		}, 0);
+	}
 
-  /** ------------------------------------------------------------------
-   *  onInfoClick(ctx, shell)
-   *  ------------------------------------------------------------------ */
-  function onInfoClick(ctx, shell) {
-    // Minimal, non-intrusive info behavior:
-    const message =
-      "HelloWorld is a reference gadget.\n\n" +
-      "- Change the greeting via the ⚙️ button in the title bar.\n" +
-      "- Your greeting is stored per-portal using ctx.settings.\n" +
-      "- This gadget is single-instance (_type: \"single\").";
+	// --- API: onInfoClick -------------------------------------------------
+	function onInfoClick(ctx, shell) {
+		var dom = getDom(ctx);
+		var hintEl = dom && dom.hintEl;
 
-    // For now keep it simple; later UX may replace this with a richer modal.
-    // Using alert() is acceptable for a reference gadget.
-    alert(message);
-  }
+		// If we have a hint element, use it; otherwise fall back to alert
+		if (hintEl) {
+			hintEl.textContent =
+				"This gadget shows a configurable greeting for this slot. " +
+				"Use the ⚙️ button in the titlebar to open settings, edit the message, " +
+				"then save with ✔ or cancel with ✖.";
+			hintEl.style.display = "block";
+		} else {
+			alert(
+				"This gadget shows a configurable greeting. " +
+				"Use the ⚙️ button in the titlebar to open settings, edit the message, " +
+				"then save with ✔ or cancel with ✖."
+			);
+		}
+	}
 
-  /** ------------------------------------------------------------------
-   *  Registration (IIFE scope → window.GADGETS[manifest._class])
-   *  ------------------------------------------------------------------ */
-  window.GADGETS = window.GADGETS || {};
-  window.GADGETS[manifest._class] = {
-    manifest,
-    info,
-    mount,
-    onSettingsRequested,
-    onInfoClick
-  };
+	// --- Global registration (IIFE, API 1.0 style) -----------------------
+	window.GADGETS = window.GADGETS || {};
+	window.GADGETS[manifest._class] = {
+		manifest: manifest,
+		mount: mount,
+		onSettingsRequested: onSettingsRequested,
+		onInfoClick: onInfoClick,
+		info: "Hello World demo gadget with per-instance settings."
+	};
 })();
