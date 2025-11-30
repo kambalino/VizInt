@@ -364,7 +364,8 @@
 						<button type="button" class="gbtn" data-fc="auto"  title="Auto On/Off">▶️</button> 
 						<button type="button" class="gbtn" data-fc="reset" title="Reset Deck">🧹</button> |
 						<button type="button" class="gbtn" data-fc="flip"  title="Flip / Reveal">🔄</button>
-						<span class="fc-flex"></span>
+						<!-- ///! Had to remove this span temporarilly, because there isn't enough space in the UI :-( can't wait to jam this back in though as the white space is visually helpful otherwise -->
+						<!-- span class="fc-flex"></span -->
 						<button type="button" class="gbtn" data-fc="flipmode" title="Toggle Answer Display (Flip / Inline)">🆎</button>
 						<button type="button" class="gbtn fc-config-hidden" data-fc="config" title="Settings">⚙️</button>
 						<button type="button" class="gbtn" data-fc="purge"  title="Erase Flash Cards data">🗑️</button>
