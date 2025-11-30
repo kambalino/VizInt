@@ -468,372 +468,434 @@
 
     renderList();
 
-    function buildMultiInstanceManager(rootEl) {
-      const portal = window.Portal;
-      const gadgetsRegistry = window.GADGETS || {};
+function buildMultiInstanceManager(rootEl) {
+  const portal = window.Portal;
 
-      if (!portal || typeof portal.getInstanceConfig !== 'function') {
-        console.warn('[Settings] Multi-instance manager: Portal.getInstanceConfig not available');
-        rootEl.textContent = 'Multi-instance support is not available in this build.';
+  // Canonical requirements for this manager:
+  // - Portal.getSettings(): to read settings.instances[...] (internal substrate)
+  // - Portal.getInstances(classId): authoritative runtime view for each class
+  if (!portal || typeof portal.getSettings !== 'function' || typeof portal.getInstances !== 'function') {
+    console.warn('[Settings] Multi-instance manager: Portal.getSettings/getInstances not available');
+    rootEl.textContent = 'Multi-instance support is not available in this build.';
+    return;
+  }
+
+  const state = {
+    // catalog[classId] = { order: [instanceId...], records: { instanceId: { instanceId, displayName, manifestId, descriptor? } } }
+    catalog: {}
+  };
+
+  // Use descriptor from runtime instances as the canonical source of manifest/meta
+  function getClassMeta(classId, entry) {
+    entry = entry || {};
+    const records = entry.records || {};
+    const instanceIds = Object.keys(records);
+    const firstId = instanceIds[0];
+    const firstRec = firstId ? records[firstId] : null;
+    const desc = firstRec && firstRec.descriptor || null;
+    const manifest = desc && desc.manifest || {};
+
+    const label =
+      manifest.label ||
+      (desc && (desc.displayName || desc.label)) ||
+      manifest._class ||
+      classId;
+
+    // We don’t have a dedicated icon field in descriptor yet; fall back to manifest.icon or a generic emoji.
+    const icon = (manifest.iconEmoji || manifest.icon) || '🔁';
+
+    const badges = Array.isArray(manifest.capabilities) ? manifest.capabilities : [];
+    const isMulti = manifest._type === 'multi' || manifest.type === 'multi';
+
+    return { label, icon, badges, isMulti };
+  }
+
+  function clearRoot() {
+    while (rootEl.firstChild) {
+      rootEl.removeChild(rootEl.firstChild);
+    }
+  }
+
+  function renderEmptyState() {
+    const empty = document.createElement('div');
+    empty.className = 'vi-mi-empty';
+    empty.textContent = 'No multi-instance gadgets are configured yet.';
+    rootEl.appendChild(empty);
+  }
+
+  function createBadge(text) {
+    const span = document.createElement('span');
+    span.className = 'vi-mi-badge';
+    span.textContent = text;
+    return span;
+  }
+
+  function createIconSpan(iconText) {
+    const span = document.createElement('span');
+    span.className = 'vi-mi-icon';
+    span.textContent = iconText;
+    return span;
+  }
+
+  function render() {
+    clearRoot();
+
+    const catalog = state.catalog || {};
+    const classIds = Object.keys(catalog);
+
+    // Filter to classes that are actually multi-instance (or that have >1 record)
+    const filteredClassIds = classIds.filter((classId) => {
+      const entry = catalog[classId] || {};
+      const meta = getClassMeta(classId, entry);
+      const recs = entry.records || {};
+      const recCount = Object.keys(recs).length;
+      return meta.isMulti || recCount > 1;
+    });
+
+    if (!filteredClassIds.length) {
+      renderEmptyState();
+      return;
+    }
+
+    // Sort by human label
+    filteredClassIds.sort((a, b) => {
+      const ma = getClassMeta(a, catalog[a]);
+      const mb = getClassMeta(b, catalog[b]);
+      return ma.label.localeCompare(mb.label);
+    });
+
+    filteredClassIds.forEach((classId) => {
+      renderClassBlock(classId, catalog[classId]);
+    });
+  }
+
+  function renderClassBlock(classId, entry) {
+    entry = entry || {};
+    const order = Array.isArray(entry.order)
+      ? entry.order.slice()
+      : Object.keys(entry.records || {});
+    const records = entry.records || {};
+    const meta = getClassMeta(classId, entry);
+
+    // Class row (parent)
+    const classRow = document.createElement('div');
+    classRow.className = 'vi-mi-class-row';
+    classRow.dataset.classId = classId;
+
+    // + button
+    const btnAdd = document.createElement('button');
+    btnAdd.type = 'button';
+    btnAdd.className = 'vi-mi-btn vi-mi-btn-add';
+    btnAdd.textContent = '+';
+    btnAdd.title = 'Add new instance';
+    classRow.appendChild(btnAdd);
+
+    // icon
+    classRow.appendChild(createIconSpan(meta.icon));
+
+    // class name
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'vi-mi-class-name';
+    nameSpan.textContent = meta.label;
+    classRow.appendChild(nameSpan);
+
+    // badges (capabilities, type, etc.)
+    const badgesHost = document.createElement('span');
+    badgesHost.className = 'vi-mi-badges';
+    (meta.badges || []).forEach((b) => badgesHost.appendChild(createBadge(b)));
+    // Show a generic "multi-instance" badge if none present
+    if (!meta.badges || !meta.badges.length) {
+      badgesHost.appendChild(createBadge('multi-instance'));
+    }
+    classRow.appendChild(badgesHost);
+
+    // reorder arrows for the whole block (class + its instances)
+    const btnUp = document.createElement('button');
+    btnUp.type = 'button';
+    btnUp.className = 'vi-mi-btn vi-mi-btn-row-up';
+    btnUp.textContent = '↑';
+    btnUp.title = 'Move class up';
+    classRow.appendChild(btnUp);
+
+    const btnDown = document.createElement('button');
+    btnDown.type = 'button';
+    btnDown.className = 'vi-mi-btn vi-mi-btn-row-down';
+    btnDown.textContent = '↓';
+    btnDown.title = 'Move class down';
+    classRow.appendChild(btnDown);
+
+    rootEl.appendChild(classRow);
+
+    // Instance rows container
+    const instancesContainer = document.createElement('div');
+    instancesContainer.className = 'vi-mi-instances';
+    rootEl.appendChild(instancesContainer);
+
+    order.forEach((instanceId) => {
+      const rec = records[instanceId];
+      if (!rec) return;
+      renderInstanceRow(instancesContainer, classId, rec);
+    });
+
+    // Wire up class-level events
+    btnAdd.addEventListener('click', () => {
+      try {
+        portal.addInstance(classId, { displayName: null });
+      } catch (err) {
+        console.error('[Settings] addInstance failed for', classId, err);
+      }
+    });
+
+    // Note: class-level up/down reordering needs a class-block ordering API in Portal.
+    // We do not invent one. These buttons are wired only if Portal.reorderClassBlock exists.
+    function maybeReorder(direction) {
+      if (typeof portal.reorderClassBlock === 'function') {
+        try {
+          portal.reorderClassBlock(classId, direction);
+        } catch (err) {
+          console.error('[Settings] reorderClassBlock failed', err);
+        }
+      } else {
+        console.warn('[Settings] reorderClassBlock not available on Portal');
+      }
+    }
+
+    btnUp.addEventListener('click', () => maybeReorder('up'));
+    btnDown.addEventListener('click', () => maybeReorder('down'));
+  }
+
+  function renderInstanceRow(parentEl, classId, rec) {
+    const instanceId = rec.instanceId;
+    const displayName = rec.displayName || instanceId;
+
+    const row = document.createElement('div');
+    row.className = 'vi-mi-instance-row';
+    row.dataset.classId = classId;
+    row.dataset.instanceId = instanceId;
+
+    // remove button
+    const btnRemove = document.createElement('button');
+    btnRemove.type = 'button';
+    btnRemove.className = 'vi-mi-btn vi-mi-btn-remove';
+    btnRemove.textContent = '−';
+    btnRemove.title = 'Remove this instance';
+    row.appendChild(btnRemove);
+
+    // visibility checkbox (stub until Portal exposes a real API)
+    const visLabel = document.createElement('label');
+    visLabel.className = 'vi-mi-vis-label';
+
+    const visCheckbox = document.createElement('input');
+    visCheckbox.type = 'checkbox';
+    visCheckbox.className = 'vi-mi-vis-checkbox';
+    visCheckbox.checked = rec.visible !== false; // default true unless explicitly false
+
+    const visText = document.createElement('span');
+    visText.textContent = 'Visible';
+
+    visLabel.appendChild(visCheckbox);
+    visLabel.appendChild(visText);
+    row.appendChild(visLabel);
+
+    // icon/meta reused from class-level descriptor
+    const meta = getClassMeta(classId, state.catalog[classId]);
+    row.appendChild(createIconSpan(meta.icon));
+
+    // editable name
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'vi-mi-instance-name';
+    nameSpan.textContent = displayName;
+    nameSpan.title = 'Click to rename';
+    row.appendChild(nameSpan);
+
+    // badges (reuse class badges for now)
+    const badgesHost = document.createElement('span');
+    badgesHost.className = 'vi-mi-badges';
+    (meta.badges || []).forEach((b) => badgesHost.appendChild(createBadge(b)));
+    row.appendChild(badgesHost);
+
+    // reorder arrows within class
+    const btnUp = document.createElement('button');
+    btnUp.type = 'button';
+    btnUp.className = 'vi-mi-btn vi-mi-btn-row-up';
+    btnUp.textContent = '↑';
+    btnUp.title = 'Move instance up';
+    row.appendChild(btnUp);
+
+    const btnDown = document.createElement('button');
+    btnDown.type = 'button';
+    btnDown.className = 'vi-mi-btn vi-mi-btn-row-down';
+    btnDown.textContent = '↓';
+    btnDown.title = 'Move instance down';
+    row.appendChild(btnDown);
+
+    parentEl.appendChild(row);
+
+    // Events
+
+    btnRemove.addEventListener('click', () => {
+      const ok = window.confirm(
+        'Are you sure you want to permanently delete this instance and all its settings?'
+      );
+      if (!ok) return;
+      try {
+        portal.removeInstance(classId, instanceId);
+      } catch (err) {
+        console.error('[Settings] removeInstance failed', err);
+      }
+    });
+
+    nameSpan.addEventListener('click', () => {
+      beginRename(row, classId, instanceId, nameSpan.textContent || '');
+    });
+
+    btnUp.addEventListener('click', () => {
+      if (typeof portal.reorderInstance === 'function') {
+        try {
+          portal.reorderInstance(classId, instanceId, 'up');
+        } catch (err) {
+          console.error('[Settings] reorderInstance(up) failed', err);
+        }
+      } else {
+        console.warn('[Settings] reorderInstance not available on Portal');
+      }
+    });
+
+    btnDown.addEventListener('click', () => {
+      if (typeof portal.reorderInstance === 'function') {
+        try {
+          portal.reorderInstance(classId, instanceId, 'down');
+        } catch (err) {
+          console.error('[Settings] reorderInstance(down) failed', err);
+        }
+      } else {
+        console.warn('[Settings] reorderInstance not available on Portal');
+      }
+    });
+
+    visCheckbox.addEventListener('change', () => {
+      // Do not invent a Portal API. Only call if Portal already provides one.
+      if (typeof portal.setInstanceVisibility === 'function') {
+        try {
+          portal.setInstanceVisibility(classId, instanceId, visCheckbox.checked);
+        } catch (err) {
+          console.error('[Settings] setInstanceVisibility failed', err);
+        }
+      } else {
+        console.warn(
+          '[Settings] Visibility checkbox is currently visual only; Portal.setInstanceVisibility is not implemented.'
+        );
+      }
+    });
+  }
+
+  function beginRename(row, classId, instanceId, currentName) {
+    const nameSpan = row.querySelector('.vi-mi-instance-name');
+    if (!nameSpan) return;
+
+    // Avoid double editors
+    if (row.querySelector('input.vi-mi-name-edit')) return;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'vi-mi-name-edit';
+    input.value = currentName;
+    input.setAttribute('maxlength', '64');
+
+    nameSpan.replaceWith(input);
+    input.focus();
+    input.select();
+
+    function commit() {
+      const newName = (input.value || '').trim();
+      if (!newName || newName === currentName) {
+        cancel();
         return;
       }
-
-      const state = {
-        catalog: portal.getInstanceConfig() || {}
-      };
-
-      function getClassMeta(classId) {
-        const api = gadgetsRegistry[classId];
-        const manifest = api && api.manifest || {};
-        const label = manifest.label || manifest._class || classId;
-        const icon = manifest.icon || '🔁'; // simple fallback
-        const badges = manifest.capabilities || [];
-        const isMulti = manifest._type === 'multi' || manifest.type === 'multi';
-        return { label, icon, badges, isMulti };
+      try {
+        portal.renameInstance(classId, instanceId, newName);
+      } catch (err) {
+        console.error('[Settings] renameInstance failed', err);
       }
-
-      function clearRoot() {
-        while (rootEl.firstChild) {
-          rootEl.removeChild(rootEl.firstChild);
-        }
-      }
-
-      function renderEmptyState() {
-        const empty = document.createElement('div');
-        empty.className = 'vi-mi-empty';
-        empty.textContent = 'No multi-instance gadgets are configured yet.';
-        rootEl.appendChild(empty);
-      }
-
-      function createBadge(text) {
-        const span = document.createElement('span');
-        span.className = 'vi-mi-badge';
-        span.textContent = text;
-        return span;
-      }
-
-      function createIconSpan(iconText) {
-        const span = document.createElement('span');
-        span.className = 'vi-mi-icon';
-        span.textContent = iconText;
-        return span;
-      }
-
-      function render() {
-        clearRoot();
-
-        const catalog = state.catalog || {};
-        const classIds = Object.keys(catalog);
-
-        // Filter to classes that are actually multi-instance (or have more than one record)
-        const filteredClassIds = classIds.filter((classId) => {
-          const entry = catalog[classId] || {};
-          const meta = getClassMeta(classId);
-          const recs = entry.records || {};
-          const recCount = Object.keys(recs).length;
-          return meta.isMulti || recCount > 1;
-        });
-
-        if (!filteredClassIds.length) {
-          renderEmptyState();
-          return;
-        }
-
-        // Keep catalog order if order array exists, otherwise sort by label
-        filteredClassIds.sort((a, b) => {
-          const ma = getClassMeta(a);
-          const mb = getClassMeta(b);
-          return ma.label.localeCompare(mb.label);
-        });
-
-        filteredClassIds.forEach((classId) => {
-          renderClassBlock(classId, catalog[classId]);
-        });
-      }
-
-      function renderClassBlock(classId, entry) {
-        entry = entry || {};
-        const order = Array.isArray(entry.order) ? entry.order.slice() : Object.keys(entry.records || {});
-        const records = entry.records || {};
-        const meta = getClassMeta(classId);
-
-        // Class row (parent)
-        const classRow = document.createElement('div');
-        classRow.className = 'vi-mi-class-row';
-        classRow.dataset.classId = classId;
-
-        // + button
-        const btnAdd = document.createElement('button');
-        btnAdd.type = 'button';
-        btnAdd.className = 'vi-mi-btn vi-mi-btn-add';
-        btnAdd.textContent = '+';
-        btnAdd.title = 'Add new instance';
-        classRow.appendChild(btnAdd);
-
-        // icon
-        classRow.appendChild(createIconSpan(meta.icon));
-
-        // class name
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'vi-mi-class-name';
-        nameSpan.textContent = meta.label;
-        classRow.appendChild(nameSpan);
-
-        // badges (capabilities, type, etc.)
-        const badgesHost = document.createElement('span');
-        badgesHost.className = 'vi-mi-badges';
-        (meta.badges || []).forEach((b) => badgesHost.appendChild(createBadge(b)));
-        // show a "multi" badge if not already obvious
-        if (!meta.badges || !meta.badges.length) {
-          badgesHost.appendChild(createBadge('multi-instance'));
-        }
-        classRow.appendChild(badgesHost);
-
-        // reorder arrows for the whole block (class + its instances)
-        const btnUp = document.createElement('button');
-        btnUp.type = 'button';
-        btnUp.className = 'vi-mi-btn vi-mi-btn-row-up';
-        btnUp.textContent = '↑';
-        btnUp.title = 'Move class up';
-        classRow.appendChild(btnUp);
-
-        const btnDown = document.createElement('button');
-        btnDown.type = 'button';
-        btnDown.className = 'vi-mi-btn vi-mi-btn-row-down';
-        btnDown.textContent = '↓';
-        btnDown.title = 'Move class down';
-        classRow.appendChild(btnDown);
-
-        rootEl.appendChild(classRow);
-
-        // Instance rows container
-        const instancesContainer = document.createElement('div');
-        instancesContainer.className = 'vi-mi-instances';
-        rootEl.appendChild(instancesContainer);
-
-        order.forEach((instanceId) => {
-          const rec = records[instanceId];
-          if (!rec) return;
-          renderInstanceRow(instancesContainer, classId, rec);
-        });
-
-        // Wire up class-level events
-        btnAdd.addEventListener('click', () => {
-          try {
-            portal.addInstance(classId, { displayName: null });
-          } catch (err) {
-            console.error('[Settings] addInstance failed for', classId, err);
-          }
-        });
-
-        // Note: class-level up/down reordering needs a class-block ordering API in Portal.
-        // We do not invent one. These buttons are wired only if Portal.reorderClassBlock exists.
-        function maybeReorder(direction) {
-          if (typeof portal.reorderClassBlock === 'function') {
-            try {
-              portal.reorderClassBlock(classId, direction);
-            } catch (err) {
-              console.error('[Settings] reorderClassBlock failed', err);
-            }
-          } else {
-            console.warn('[Settings] reorderClassBlock not available on Portal');
-          }
-        }
-
-        btnUp.addEventListener('click', () => maybeReorder('up'));
-        btnDown.addEventListener('click', () => maybeReorder('down'));
-      }
-
-      function renderInstanceRow(parentEl, classId, rec) {
-        const instanceId = rec.instanceId;
-        const displayName = rec.displayName || instanceId;
-
-        const row = document.createElement('div');
-        row.className = 'vi-mi-instance-row';
-        row.dataset.classId = classId;
-        row.dataset.instanceId = instanceId;
-
-        // remove button
-        const btnRemove = document.createElement('button');
-        btnRemove.type = 'button';
-        btnRemove.className = 'vi-mi-btn vi-mi-btn-remove';
-        btnRemove.textContent = '−';
-        btnRemove.title = 'Remove this instance';
-        row.appendChild(btnRemove);
-
-        // visibility checkbox (stub until Portal exposes a real API)
-        const visLabel = document.createElement('label');
-        visLabel.className = 'vi-mi-vis-label';
-
-        const visCheckbox = document.createElement('input');
-        visCheckbox.type = 'checkbox';
-        visCheckbox.className = 'vi-mi-vis-checkbox';
-        visCheckbox.checked = rec.visible !== false; // default true unless explicitly false
-
-        const visText = document.createElement('span');
-        visText.textContent = 'Visible';
-
-        visLabel.appendChild(visCheckbox);
-        visLabel.appendChild(visText);
-        row.appendChild(visLabel);
-
-        // icon
-        const meta = getClassMeta(classId);
-        row.appendChild(createIconSpan(meta.icon));
-
-        // editable name
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'vi-mi-instance-name';
-        nameSpan.textContent = displayName;
-        nameSpan.title = 'Click to rename';
-        row.appendChild(nameSpan);
-
-        // badges (reuse class badges for now)
-        const badgesHost = document.createElement('span');
-        badgesHost.className = 'vi-mi-badges';
-        (meta.badges || []).forEach((b) => badgesHost.appendChild(createBadge(b)));
-        row.appendChild(badgesHost);
-
-        // reorder arrows within class
-        const btnUp = document.createElement('button');
-        btnUp.type = 'button';
-        btnUp.className = 'vi-mi-btn vi-mi-btn-row-up';
-        btnUp.textContent = '↑';
-        btnUp.title = 'Move instance up';
-        row.appendChild(btnUp);
-
-        const btnDown = document.createElement('button');
-        btnDown.type = 'button';
-        btnDown.className = 'vi-mi-btn vi-mi-btn-row-down';
-        btnDown.textContent = '↓';
-        btnDown.title = 'Move instance down';
-        row.appendChild(btnDown);
-
-        parentEl.appendChild(row);
-
-        // Events
-
-        btnRemove.addEventListener('click', () => {
-          const ok = window.confirm(
-            'Are you sure you want to permanently delete this instance and all its settings?'
-          );
-          if (!ok) return;
-          try {
-            portal.removeInstance(classId, instanceId);
-          } catch (err) {
-            console.error('[Settings] removeInstance failed', err);
-          }
-        });
-
-        nameSpan.addEventListener('click', () => {
-          beginRename(row, classId, instanceId, nameSpan.textContent || '');
-        });
-
-        btnUp.addEventListener('click', () => {
-          if (typeof portal.reorderInstance === 'function') {
-            try {
-              portal.reorderInstance(classId, instanceId, 'up');
-            } catch (err) {
-              console.error('[Settings] reorderInstance(up) failed', err);
-            }
-          } else {
-            console.warn('[Settings] reorderInstance not available on Portal');
-          }
-        });
-
-        btnDown.addEventListener('click', () => {
-          if (typeof portal.reorderInstance === 'function') {
-            try {
-              portal.reorderInstance(classId, instanceId, 'down');
-            } catch (err) {
-              console.error('[Settings] reorderInstance(down) failed', err);
-            }
-          } else {
-            console.warn('[Settings] reorderInstance not available on Portal');
-          }
-        });
-
-        visCheckbox.addEventListener('change', () => {
-          // Do not invent a Portal API. Only call if Portal already provides one.
-          if (typeof portal.setInstanceVisibility === 'function') {
-            try {
-              portal.setInstanceVisibility(classId, instanceId, visCheckbox.checked);
-            } catch (err) {
-              console.error('[Settings] setInstanceVisibility failed', err);
-            }
-          } else {
-            console.warn(
-              '[Settings] Visibility checkbox is currently visual only; Portal.setInstanceVisibility is not implemented.'
-            );
-          }
-        });
-      }
-
-      function beginRename(row, classId, instanceId, currentName) {
-        const nameSpan = row.querySelector('.vi-mi-instance-name');
-        if (!nameSpan) return;
-
-        // Avoid double editors
-        if (row.querySelector('input.vi-mi-name-edit')) return;
-
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'vi-mi-name-edit';
-        input.value = currentName;
-        input.setAttribute('maxlength', '64');
-
-        nameSpan.replaceWith(input);
-        input.focus();
-        input.select();
-
-        function commit() {
-          const newName = (input.value || '').trim();
-          if (!newName || newName === currentName) {
-            cancel();
-            return;
-          }
-          try {
-            portal.renameInstance(classId, instanceId, newName);
-          } catch (err) {
-            console.error('[Settings] renameInstance failed', err);
-          }
-        }
-
-        function cancel() {
-          input.replaceWith(nameSpan);
-        }
-
-        input.addEventListener('keydown', (ev) => {
-          if (ev.key === 'Enter') {
-            ev.preventDefault();
-            commit();
-          } else if (ev.key === 'Escape' || ev.key === 'Esc') {
-            ev.preventDefault();
-            cancel();
-          }
-        });
-
-        input.addEventListener('blur', () => {
-          cancel();
-        });
-      }
-
-      function refreshFromPortal() {
-        try {
-          state.catalog = portal.getInstanceConfig() || {};
-        } catch (err) {
-          console.error('[Settings] Failed to refresh instance config', err);
-        }
-        render();
-      }
-
-      // Listen for Portal events
-      window.addEventListener('portal:gadgetInstancesChanged', refreshFromPortal);
-      window.addEventListener('portal:gadgetRenamed', refreshFromPortal);
-
-      // Initial render
-      refreshFromPortal();
     }
+
+    function cancel() {
+      input.replaceWith(nameSpan);
+    }
+
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        commit();
+      } else if (ev.key === 'Escape' || ev.key === 'Esc') {
+        ev.preventDefault();
+        cancel();
+      }
+    });
+
+    input.addEventListener('blur', () => {
+      cancel();
+    });
+  }
+
+  function refreshFromPortal() {
+    let settings;
+    try {
+      settings = portal.getSettings() || {};
+    } catch (err) {
+      console.error('[Settings] Failed to read Portal settings for instances', err);
+      settings = {};
+    }
+
+    const inst = (settings && settings.instances) || {};
+    const catalog = {};
+
+    Object.keys(inst).forEach((classId) => {
+      const entry = inst[classId] || {};
+      const order = Array.isArray(entry.order) ? entry.order.slice() : [];
+      const records = entry.records || {};
+
+      // Merge in runtime descriptors from Portal.getInstances(classId)
+      let runtimeInstances = [];
+      try {
+        runtimeInstances = portal.getInstances(classId) || [];
+      } catch (err) {
+        console.warn('[Settings] getInstances failed for', classId, err);
+      }
+      const descById = {};
+      runtimeInstances.forEach((ri) => {
+        if (!ri || !ri.instanceId) return;
+        descById[ri.instanceId] = ri.descriptor || null;
+      });
+
+      const mergedRecords = {};
+      Object.keys(records).forEach((instanceId) => {
+        const baseRec = records[instanceId];
+        mergedRecords[instanceId] = {
+          ...baseRec,
+          descriptor: descById[instanceId] || null
+        };
+      });
+
+      catalog[classId] = {
+        order,
+        records: mergedRecords
+      };
+    });
+
+    state.catalog = catalog;
+    render();
+  }
+
+  // Listen for Portal events
+  window.addEventListener('portal:gadgetInstancesChanged', refreshFromPortal);
+  window.addEventListener('portal:gadgetRenamed', refreshFromPortal);
+
+  // Initial render
+  refreshFromPortal();
+}
+	
+
 
   }
 
