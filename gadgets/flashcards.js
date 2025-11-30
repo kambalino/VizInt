@@ -1,6 +1,7 @@
 // gadgets/flashcards.js
-// $VER: FlashCards v0.3.0 — toolbar 🆎 answer-display toggle; hide in-gadget settings button
+// $VER: FlashCards v0.3.1 — toolbar button on/off styling; smaller buttons; settings click-to-toggle
 // $HISTORY:
+//   v0.3.1 — toolbar button on/off styling; smaller buttons; settings click-to-toggle
 //   v0.3.0 — toolbar 🆎 answer-display toggle; hide in-gadget settings button
 //   v0.2.9 — auto-reparse on mount; parseCSV instrumentation; silent toggleConfig after save
 
@@ -11,13 +12,15 @@
 		_class: "FlashCards",
 		_type: "singleton",
 		_id: "Local",
-		_ver: "v0.3.0",
-		verblurb: "toolbar 🆎 answer-display toggle; hide in-gadget settings button",
+		_ver: "v0.3.1",
+		verblurb:
+			"toolbar button on/off styling; smaller buttons; settings click-to-toggle",
 		label: "Flash Cards",
 		iconEmoji: "🎓",
 		capabilities: ["network"], // URL fetch (paste works offline)
-		description: "CSV-powered flash cards with sequential or diminishing-random rotation.",
-		supportsSettings: true   // 👈 THIS is the important bit
+		description:
+			"CSV-powered flash cards with sequential or diminishing-random rotation.",
+		supportsSettings: true // 👈 THIS is the important bit
 	};
 
 	const info =
@@ -33,7 +36,17 @@
 		const temp = document.createElement("div");
 		temp.innerHTML = html;
 
-		const ALLOWED = new Set(["B", "I", "EM", "STRONG", "SMALL", "SPAN", "SUB", "SUP", "BR"]);
+		const ALLOWED = new Set([
+			"B",
+			"I",
+			"EM",
+			"STRONG",
+			"SMALL",
+			"SPAN",
+			"SUB",
+			"SUP",
+			"BR"
+		]);
 
 		const walk = (node) => {
 			for (const n of Array.from(node.childNodes)) {
@@ -136,7 +149,9 @@
 		if (rows.length > 1) {
 			const hdr = rows[0].map((x) => (x || "").trim().toLowerCase());
 			const looksHeader =
-				hdr.includes("side a") || hdr.includes("side b") || hdr.includes("notes");
+				hdr.includes("side a") ||
+				hdr.includes("side b") ||
+				hdr.includes("notes");
 			if (looksHeader) startIdx = 1;
 		}
 
@@ -201,7 +216,7 @@
 		console.debug("[Flashcards] mount() ENTER", {
 			hostTag: host && host.tagName,
 			hasCtx: !!ctx,
-			//I suspect one of these is redundant
+			///! I suspect one of these is redundant
 			hasGetSettings: !!(ctx && ctx.getSettings),
 			hasSetSettings: !!(ctx && ctx.setSettings)
 		});
@@ -212,7 +227,8 @@
 
 			// Persisted (user intent only)
 			const s =
-				(ctx && typeof ctx.getSettings === "function" && ctx.getSettings()) || {};
+				(ctx && typeof ctx.getSettings === "function" && ctx.getSettings()) ||
+				{};
 			console.debug("[Flashcards] mount() settings snapshot", s);
 
 			const my = s.flashcards || {
@@ -222,7 +238,7 @@
 				mode: "drand", // "sequential" | "drand"
 				auto: true,
 				intervalMs: 5000,
-				flipStyle: "reveal", // "reveal" (Flip to Answers) | "inline" (Include Answers)
+				flipStyle: "reveal", // "reveal" | "inline"
 				ui: { showConfig: false }
 			};
 
@@ -257,7 +273,7 @@
 			my.pool = my.pool || [];
 			my.history = my.history || [];
 
-			// Diminishing-random cycle state (runtime only – we treat it as session-local)
+			// Diminishing-random cycle state (runtime only – session-local)
 			my.cycleOrder = null;
 			my.cyclePos = 0;
 			my.prevCycleOrder = null;
@@ -283,14 +299,18 @@
 				console.debug("[Flashcards] save() called", patch);
 
 				const all =
-					(ctx && typeof ctx.getSettings === "function" && ctx.getSettings()) || {};
+					(ctx && typeof ctx.getSettings === "function" && ctx.getSettings()) ||
+					{};
 				const current = all.flashcards || {};
 
 				const nextPersist = {
 					rawCSV: patch.rawCSV !== undefined ? patch.rawCSV : current.rawCSV || "",
 					sourceUrl:
-						patch.sourceUrl !== undefined ? patch.sourceUrl : current.sourceUrl || "",
-					parsed: patch.parsed !== undefined ? patch.parsed : current.parsed || [],
+						patch.sourceUrl !== undefined
+							? patch.sourceUrl
+							: current.sourceUrl || "",
+					parsed:
+						patternOr(patch.parsed, current.parsed, []) || [],
 					mode: patch.mode !== undefined ? patch.mode : current.mode || "drand",
 					auto:
 						patch.auto !== undefined
@@ -360,14 +380,36 @@
 					<div class="fc-controls">
 						<button type="button" class="gbtn" data-fc="prev"  title="Previous">⏮️</button>
 						<button type="button" class="gbtn" data-fc="next"  title="Next">⏭️</button> |
-						<button type="button" class="gbtn" data-fc="mode"  title="Toggle Mode (Sequential / Diminishing Random)">🔁</button>
-						<button type="button" class="gbtn" data-fc="auto"  title="Auto On/Off">▶️</button> 
+						<button
+							type="button"
+							class="gbtn"
+							data-fc="mode"
+							title="Toggle Mode (Sequential / Diminishing Random)"
+							aria-pressed="false"
+						>🔁</button>
+						<button
+							type="button"
+							class="gbtn"
+							data-fc="auto"
+							title="Auto On/Off"
+							aria-pressed="false"
+						>▶️</button> 
 						<button type="button" class="gbtn" data-fc="reset" title="Reset Deck">🧹</button> |
 						<button type="button" class="gbtn" data-fc="flip"  title="Flip / Reveal">🔄</button>
-						<!-- ///! Had to remove this span temporarilly, because there isn't enough space in the UI :-( can't wait to jam this back in though as the white space is visually helpful otherwise -->
-						<!-- span class="fc-flex"></span -->
-						<button type="button" class="gbtn" data-fc="flipmode" title="Toggle Answer Display (Flip / Inline)">🆎</button>
-						<button type="button" class="gbtn fc-config-hidden" data-fc="config" title="Settings">⚙️</button>
+						<span class="fc-flex"></span>
+						<button
+							type="button"
+							class="gbtn"
+							data-fc="flipmode"
+							title="Toggle Answer Display (Flip / Inline)"
+							aria-pressed="false"
+						>🆎</button>
+						<button
+							type="button"
+							class="gbtn fc-config-hidden"
+							data-fc="config"
+							title="Settings"
+						>⚙️</button>
 						<button type="button" class="gbtn" data-fc="purge"  title="Erase Flash Cards data">🗑️</button>
 					</div>
 				</div>
@@ -450,6 +492,10 @@
 			const saveBtn = host.querySelector("#fc-save");
 			const saveNote = host.querySelector("#fc-save-note");
 			const errOut = host.querySelector("#fc-err");
+
+			const modeBtn = elControls.querySelector('[data-fc="mode"]');
+			const autoBtn = elControls.querySelector('[data-fc="auto"]');
+			const flipModeBtn = elControls.querySelector('[data-fc="flipmode"]');
 
 			let timer = null;
 			let cdTimer = null; // countdown timer (for auto rem/total s)
@@ -747,7 +793,9 @@
 				if (my.flipStyle === "inline") {
 					elFront.style.display = "none";
 					elBack.style.display = "none";
-					const noteBlock = N ? `<div class="fc-notes muted">${N}</div>` : "";
+					const noteBlock = N
+						? `<div class="fc-notes muted">${N}</div>`
+						: "";
 					elInline.style.display = "";
 					elInline.innerHTML = `<div class="fc-q">${A}</div><div class="fc-a">(${B})</div>${noteBlock}`;
 				} else {
@@ -755,7 +803,9 @@
 					elFront.style.display = showingAnswer ? "none" : "";
 					elBack.style.display = showingAnswer ? "" : "none";
 					elFront.innerHTML = `<div class="fc-q">${A}</div>`;
-					const notesLine = N ? `<div class="fc-notes muted">${N}</div>` : "";
+					const notesLine = N
+						? `<div class="fc-notes muted">${N}</div>`
+						: "";
 					elBack.innerHTML = `<div class="fc-a">${B}</div>${notesLine}`;
 				}
 
@@ -784,7 +834,11 @@
 				const actual = total ? idx + 1 : 0;
 
 				let drandPos = actual;
-				if (my.mode === "drand" && Array.isArray(my.cycleOrder) && my.cycleOrder.length) {
+				if (
+					my.mode === "drand" &&
+					Array.isArray(my.cycleOrder) &&
+					my.cycleOrder.length
+				) {
 					drandPos = my.cyclePos + 1;
 				}
 
@@ -793,11 +847,32 @@
 				let autoTxt = "manual";
 
 				if (my.auto) {
-					const rem = Math.max(0, Math.ceil((nextDueTs - Date.now()) / 1000));
+					const rem = Math.max(
+						0,
+						Math.ceil((nextDueTs - Date.now()) / 1000)
+					);
 					autoTxt = `auto ${rem}/${totSec | 0}s`;
 				}
 
 				elStatus.textContent = `[ #${actual}~${drandPos}/${total} ] · ${modeTxt} · ${autoTxt}`;
+			}
+
+			function updateToggleButtonStates() {
+				if (modeBtn) {
+					const on = my.mode === "drand";
+					modeBtn.classList.toggle("is-on", on);
+					modeBtn.setAttribute("aria-pressed", on ? "true" : "false");
+				}
+				if (autoBtn) {
+					const on = !!my.auto;
+					autoBtn.classList.toggle("is-on", on);
+					autoBtn.setAttribute("aria-pressed", on ? "true" : "false");
+				}
+				if (flipModeBtn) {
+					const on = my.flipStyle === "inline";
+					flipModeBtn.classList.toggle("is-on", on);
+					flipModeBtn.setAttribute("aria-pressed", on ? "true" : "false");
+				}
 			}
 
 			function render() {
@@ -818,8 +893,8 @@
 				updateStatus();
 				renderCard(idx);
 
-				const autoBtn = elControls.querySelector('[data-fc="auto"]');
-				autoBtn.textContent = my.auto ? "⏸️" : "▶️";
+				if (autoBtn) autoBtn.textContent = my.auto ? "⏸️" : "▶️";
+				updateToggleButtonStates();
 
 				painting = false;
 			}
@@ -846,7 +921,8 @@
 				});
 
 				stopTimer();
-				if (!my.auto || !my.parsed.length || (my.ui && my.ui.showConfig)) return;
+				if (!my.auto || !my.parsed.length || (my.ui && my.ui.showConfig))
+					return;
 
 				const ivl = my.intervalMs || 5000;
 				nextDueTs = Date.now() + ivl;
@@ -923,7 +999,9 @@
 					}
 				} else if (act === "flipmode") {
 					my.flipStyle = my.flipStyle === "inline" ? "reveal" : "inline";
-					console.debug("[Flashcards] flipmode toggle", { flipStyle: my.flipStyle });
+					console.debug("[Flashcards] flipmode toggle", {
+						flipStyle: my.flipStyle
+					});
 					flipIn.value = my.flipStyle;
 					const next = save({ flipStyle: my.flipStyle });
 					Object.assign(my, next);
@@ -946,14 +1024,18 @@
 					render();
 				} else if (act === "config") {
 					console.debug("[Flashcards] config button");
-					toggleConfig(true);
+					// Toggle config open/close based on current ui.showConfig
+					const nextShow = !(my.ui && my.ui.showConfig);
+					toggleConfig(nextShow);
 				} else if (act === "purge") {
 					console.debug("[Flashcards] purge button");
 					stopTimer();
 					cancelPendingSave();
 
 					const latestAll =
-						(ctx && typeof ctx.getSettings === "function" && ctx.getSettings()) || {};
+						(ctx &&
+							typeof ctx.getSettings === "function" &&
+							ctx.getSettings()) || {};
 					const nextAll = { ...latestAll };
 					delete nextAll.flashcards;
 					console.debug("[Flashcards] purge writing settings", nextAll);
@@ -1020,8 +1102,11 @@
 					setTimeout(() => (loadNote.textContent = ""), 1200);
 				} catch (err) {
 					console.error("[Flashcards] load from URL error", err);
-					loadNote.textContent = "CORS or fetch error. Please paste CSV instead.";
-					errOut.textContent = String(err && err.message ? err.message : err);
+					loadNote.textContent =
+						"CORS or fetch error. Please paste CSV instead.";
+					errOut.textContent = String(
+						err && err.message ? err.message : err
+					);
 				}
 			});
 
@@ -1058,7 +1143,9 @@
 				errOut.textContent =
 					parsed.errors.length > 0
 						? "Imported with some row issues:\n" +
-							parsed.errors.map((e) => `Row ${e.row}: ${e.reason}`).join("\n")
+						  parsed.errors
+								.map((e) => `Row ${e.row}: ${e.reason}`)
+								.join("\n")
 						: "Imported successfully.";
 
 				saveNote.textContent = "Saved.";
@@ -1118,30 +1205,45 @@
 
 	function onSettingsRequested(ctx, { slot, body }) {
 		console.debug("[Flashcards] onSettingsRequested()", { slot });
-		const cfgBtn = body && body.querySelector('.fc-controls button[data-fc="config"]');
+		const cfgBtn =
+			body && body.querySelector('.fc-controls button[data-fc="config"]');
 		if (cfgBtn) {
+			// delegate to the same toggle logic as in-gadget settings
 			cfgBtn.click();
 			return;
 		}
-		const cfg = body && body.querySelector('.fc-config');
-		if (cfg) cfg.style.display = "";
+		const cfg = body && body.querySelector(".fc-config");
+		if (cfg) {
+			const isShown = cfg.style.display !== "none";
+			cfg.style.display = isShown ? "none" : "";
+		}
 	}
 
 	// Titlebar info-click → open the same config overlay (uses the gadget's own handler)
 	function onInfoClick(ctx, { slot, body }) {
 		console.debug("[Flashcards] onInfoClick()", { slot });
-		const cfgBtn = body && body.querySelector('.fc-controls button[data-fc="config"]');
+		const cfgBtn =
+			body && body.querySelector('.fc-controls button[data-fc="config"]');
 		if (cfgBtn) {
 			cfgBtn.click();
 			return;
 		}
-		const cfg = body && body.querySelector('.fc-config');
-		if (cfg) cfg.style.display = "";
+		const cfg = body && body.querySelector(".fc-config");
+		if (cfg) {
+			const isShown = cfg.style.display !== "none";
+			cfg.style.display = isShown ? "none" : "";
+		}
 	}
 
 	// Expose
 	window.GADGETS = window.GADGETS || {};
-	window.GADGETS.flashcards = { manifest, info, mount, onInfoClick, onSettingsRequested };
+	window.GADGETS.flashcards = {
+		manifest,
+		info,
+		mount,
+		onInfoClick,
+		onSettingsRequested
+	};
 
 	// ===== Styles (scoped-ish) =====
 	const css = `	
@@ -1192,8 +1294,35 @@
 		.fc-status { text-align:right; }
 
 		.fc-hr { margin: 4px 0; opacity: 0.25; }
-		.fc-controls { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
-		.fc-flex { flex:1; }
+		.fc-controls {
+			display:flex;
+			align-items:center;
+			gap:4px;
+			flex-wrap:wrap;
+		}
+		.fc-flex {
+			flex:1 1 auto;
+			min-width:8px; /* will collapse away when space is tight */
+		}
+
+		/* smaller, more compact toolbar buttons */
+		.fc-controls .gbtn {
+			padding:2px 4px;
+			font-size:0.9em;
+			line-height:1.1;
+			min-width:0;
+		}
+
+		/* visual pressed / toggled state for mode/auto/flipmode */
+		.fc-controls .gbtn.is-on {
+			outline:1px solid currentColor;
+			border-radius:999px;
+			box-shadow:0 0 0 1px rgba(255,255,255,0.15);
+		}
+		.fc-controls .gbtn:active {
+			transform:translateY(1px);
+			opacity:0.75;
+		}
 
 		.fc-config-hidden {
 			display:none;
@@ -1225,7 +1354,11 @@
 
 		.fc-cfg-title { font-weight:600; }
 		.fc-config .field label { font-weight:600; }
-		.fc-config .field textarea, .fc-config .field input, .fc-config .field select { width:100%; }
+		.fc-config .field textarea,
+		.fc-config .field input,
+		.fc-config .field select {
+			width:100%;
+		}
 		
 		.fc-url-row .fc-url-input-row {
 			display:flex;
