@@ -1,4 +1,9 @@
 // gadgets/flashcards.js
+// $VER: FlashCards v0.3.0 — toolbar 🆎 answer-display toggle; hide in-gadget settings button
+// $HISTORY:
+//   v0.3.0 — toolbar 🆎 answer-display toggle; hide in-gadget settings button
+//   v0.2.9 — auto-reparse on mount; parseCSV instrumentation; silent toggleConfig after save
+
 (function () {
 	// ===== Manifest (VizInt v1.0) =====
 	const manifest = {
@@ -6,8 +11,8 @@
 		_class: "FlashCards",
 		_type: "singleton",
 		_id: "Local",
-		_ver: "v0.2.9",
-		verblurb: "auto-reparse on mount; parseCSV instrumentation; silent toggleConfig after save",
+		_ver: "v0.3.0",
+		verblurb: "toolbar 🆎 answer-display toggle; hide in-gadget settings button",
 		label: "Flash Cards",
 		iconEmoji: "🎓",
 		capabilities: ["network"], // URL fetch (paste works offline)
@@ -50,7 +55,7 @@
 		return temp.innerHTML;
 	}
 
-	// Heuristic delimiter detection: comma, semicolon, or tab
+	// Heuristic delimiter detection: comma, semicolon, tab, or pipe
 	function detectDelimiter(sampleText) {
 		const firstLines = sampleText.split(/\r?\n/).slice(0, 5);
 		const count = (re) =>
@@ -61,7 +66,7 @@
 		const C = count(/,/g);
 		const S = count(/;/g);
 		const T = count(/\t/g);
-		const P = count(/\|/g);
+		const P = count(/\|/g); // pipe
 
 		const best = Math.max(C, S, T, P);
 
@@ -360,7 +365,8 @@
 						<button type="button" class="gbtn" data-fc="reset" title="Reset Deck">🧹</button> |
 						<button type="button" class="gbtn" data-fc="flip"  title="Flip / Reveal">🔄</button>
 						<span class="fc-flex"></span>
-						<button type="button" class="gbtn" data-fc="config" title="Settings">⚙️</button>
+						<button type="button" class="gbtn" data-fc="flipmode" title="Toggle Answer Display (Flip / Inline)">🆎</button>
+						<button type="button" class="gbtn fc-config-hidden" data-fc="config" title="Settings">⚙️</button>
 						<button type="button" class="gbtn" data-fc="purge"  title="Erase Flash Cards data">🗑️</button>
 					</div>
 				</div>
@@ -914,6 +920,15 @@
 						render();
 						if (my.auto) restartTimer();
 					}
+				} else if (act === "flipmode") {
+					my.flipStyle = my.flipStyle === "inline" ? "reveal" : "inline";
+					console.debug("[Flashcards] flipmode toggle", { flipStyle: my.flipStyle });
+					flipIn.value = my.flipStyle;
+					const next = save({ flipStyle: my.flipStyle });
+					Object.assign(my, next);
+					showingAnswer = false;
+					render();
+					if (my.auto) restartTimer();
 				} else if (act === "reset") {
 					console.debug("[Flashcards] reset button");
 					stopTimer();
@@ -1109,8 +1124,8 @@
 		}
 		const cfg = body && body.querySelector('.fc-config');
 		if (cfg) cfg.style.display = "";
-
 	}
+
 	// Titlebar info-click → open the same config overlay (uses the gadget's own handler)
 	function onInfoClick(ctx, { slot, body }) {
 		console.debug("[Flashcards] onInfoClick()", { slot });
@@ -1179,6 +1194,9 @@
 		.fc-controls { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
 		.fc-flex { flex:1; }
 
+		.fc-config-hidden {
+			display:none;
+		}
 
 		.fc-config {
 			/* when hidden, JS sets display:none; when shown, we want full-height flex */
