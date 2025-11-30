@@ -11,7 +11,8 @@
 		label: "Flash Cards",
 		iconEmoji: "🎓",
 		capabilities: ["network"], // URL fetch (paste works offline)
-		description: "CSV-powered flash cards with sequential or diminishing-random rotation."
+		description: "CSV-powered flash cards with sequential or diminishing-random rotation.",
+		supportsSettings: true   // 👈 THIS is the important bit
 	};
 
 	const info =
@@ -195,6 +196,7 @@
 		console.debug("[Flashcards] mount() ENTER", {
 			hostTag: host && host.tagName,
 			hasCtx: !!ctx,
+			//I suspect one of these is redundant
 			hasGetSettings: !!(ctx && ctx.getSettings),
 			hasSetSettings: !!(ctx && ctx.setSettings)
 		});
@@ -1098,6 +1100,17 @@
 		}
 	}
 
+	function onSettingsRequested(ctx, { slot, body }) {
+		console.debug("[Flashcards] onSettingsRequested()", { slot });
+		const cfgBtn = body && body.querySelector('.fc-controls button[data-fc="config"]');
+		if (cfgBtn) {
+			cfgBtn.click();
+			return;
+		}
+		const cfg = body && body.querySelector('.fc-config');
+		if (cfg) cfg.style.display = "";
+
+	}
 	// Titlebar info-click → open the same config overlay (uses the gadget's own handler)
 	function onInfoClick(ctx, { slot, body }) {
 		console.debug("[Flashcards] onInfoClick()", { slot });
@@ -1112,7 +1125,7 @@
 
 	// Expose
 	window.GADGETS = window.GADGETS || {};
-	window.GADGETS.flashcards = { manifest, info, mount, onInfoClick };
+	window.GADGETS.flashcards = { manifest, info, mount, onInfoClick, onSettingsRequested };
 
 	// ===== Styles (scoped-ish) =====
 	const css = `	
