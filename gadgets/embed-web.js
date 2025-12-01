@@ -1,10 +1,11 @@
 /*
  *
- *  $VER: EmbedWeb 1.2.1
+ *  $VER: EmbedWeb 1.2.2
  * 
  *  ///! MERGE HISTORIES BELOW
  * 
  *  $HISTORY:
+ *  	2025/11/30 1.2.2	Restored ✏️ popover editor + debug checkbox alongside Settings; popover submit now updates settings + live instance (U:Fx)
  *  	2025/11/30 1.2.1	Converted to multi-instance gadget, v1.2 manifest, Settings-driven URL config (U:Fx)
  *  	2025/10/01 0.3.6	Debug checkbox in popover; debugColors persisted in settings (U:Vz)
  * 
@@ -63,11 +64,11 @@
 		_class: "EmbedWeb",          // canonical class identity (Portal will normalize)
 		_type: "multi",              // multi-instance gadget
 		_id: "default",              // internal variant id (kept simple for now)
-		_ver: "v1.2.1",
+		_ver: "v1.2.2",
 		label: "Custom Embed",
 		iconEmoji: "🌐",
 		description:
-			"Embed external web content via <iframe>. Configure the URL via the gadget’s Settings (gear). Hover the very top edge to reveal a tiny toolbar (✏️ Edit / 🔄 Refresh / 🔗 Open); multiple instances are supported.",
+			"Embed external web content via <iframe>. Configure the URL via the gadget’s Settings (gear) or the inline ✏️ popover. Hover the very top edge to reveal a tiny toolbar (✏️ Edit / 🔄 Refresh / 🔗 Open); multiple instances are supported.",
 		capabilities: ["network"],
 		supportsSettings: true,
 		// badges: [] // (optional; Portal will derive badges from capabilities)
@@ -153,13 +154,52 @@
 			}
 			.vi-ew-toolbtn:hover { background: rgba(0,0,0,.06); }
 
+			/* Inline popover for quick edit (✏️) */
+			.vi-ew-pop {
+				position: absolute;
+				top: 6px;
+				left: 50%;
+				transform: translateX(-50%);
+				z-index: 10;
+				background: #fff;
+				border-radius: 8px;
+				box-shadow: 0 2px 8px rgba(0,0,0,.15);
+				padding: 6px 8px;
+				font-size: 11px;
+				display: none;
+				min-width: 240px;
+			}
+			.vi-ew-pop.show {
+				display: block;
+			}
+			.vi-ew-pop form {
+				display: flex;
+				flex-direction: column;
+				gap: 4px;
+			}
+			.vi-ew-pop label {
+				font-size: 11px;
+			}
+			.vi-ew-pop input[type="text"],
+			.vi-ew-pop select {
+				font-size: 11px;
+				width: 100%;
+				box-sizing: border-box;
+			}
+			.vi-ew-pop .vi-ew-pop-buttons {
+				display: flex;
+				justify-content: flex-end;
+				gap: 4px;
+				margin-top: 4px;
+			}
+
 			/* Iframe panel; extra whitespace buffer is applied as margin-top on this */
 			.vi-ew-body { position: relative; z-index: 1; }
 			.vi-ew-iframe {
 				width: 100%; height: 460px; border: 0; display: block;
 				background: #fff; position: relative; z-index: 1;
 			}
-			/* While tools are open (e.g., during hover), prevent iframe from eating pointer events */
+			/* While tools are open (e.g., during hover/popover), prevent iframe from eating pointer events */
 			.vi-embedweb.tools-open .vi-ew-iframe {
 				pointer-events: none;
 			}
@@ -180,7 +220,7 @@
 				font-size: 12px; color: #555; padding: 8px 6px;
 			}
 
-			/* Debug rainbow mode (opt-in via Settings) */
+			/* Debug rainbow mode (opt-in via Settings or popover) */
 			.vi-embedweb.debug .vi-ew-handle {
 				background: red !important;
 			}
@@ -196,37 +236,8 @@
 		`;
 		root.appendChild(css);
 
-		// Handle bar + centered toolbar (now only Refresh / Open; editing is via Settings)
-		const handle = el("div", "vi-ew-handle");
-		const tools = el("div", "vi-ew-tools");
-		const tRefresh = btn("🔄", "Refresh");
-		const tOpen = btn("🔗", "Open in new tab");
-		tools.append(tRefresh, tOpen);
-		handle.appendChild(tools);
-
-		// Iframe body + error chip
-		const body = el("div", "vi-ew-body");
-		const iframe = el("iframe", "vi-ew-iframe", {
-			sandbox: "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox",
-		});
-		const errorChip = el("div", "vi-ew-error");
-		errorChip.append(
-			el("span", "", null, "This site may block embedding."),
-			el("span", "vi-ew-errlink", null, "Open in new tab")
-		);
-		body.append(iframe, errorChip);
-
-		const hint = el(
-			"div",
-			"vi-ew-hint",
-			null,
-			"No URL saved. Use the gadget’s Settings (gear icon) to configure an embed URL. Example: https://example.com or file:///C:/path/to/local.html"
-		);
-
-		root.append(handle, body, hint);
-
-		// --- expand/collapse helpers ---
 		let collapseTimer = null;
+		let pop = null;
 
 		const isExpanded = () => handle.classList.contains("expanded");
 
@@ -273,10 +284,56 @@
 			}
 		};
 
-		// expose control API for onInfoClick
-		root.__api = { toggleBar };
+		// Forward-declared so the ✏️ handler can call it before pop is constructed.
+		function showPopover() {
+			if (!pop) return;
+			pop.classList.add("show");
+			expand();
+		}
+		function hidePopover() {
+			if (!pop) return;
+			pop.classList.remove("show");
+		}
+		function togglePopover() {
+			if (!pop) return;
+			if (pop.classList.contains("show")) {
+				hidePopover();
+			} else {
+				showPopover();
+			}
+		}
 
-		// Hover & click behaviour
+		// Handle bar + centered toolbar (now ✏️ / Refresh / Open)
+		const handle = el("div", "vi-ew-handle");
+		const tools = el("div", "vi-ew-tools");
+		const tEdit = btn("✏️", "Edit URL / options");
+		const tRefresh = btn("🔄", "Refresh");
+		const tOpen = btn("🔗", "Open in new tab");
+		tools.append(tEdit, tRefresh, tOpen);
+		handle.appendChild(tools);
+
+		// Iframe body + error chip
+		const body = el("div", "vi-ew-body");
+		const iframe = el("iframe", "vi-ew-iframe", {
+			sandbox: "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox",
+		});
+		const errorChip = el("div", "vi-ew-error");
+		errorChip.append(
+			el("span", "", null, "This site may block embedding."),
+			el("span", "vi-ew-errlink", null, "Open in new tab")
+		);
+		body.append(iframe, errorChip);
+
+		const hint = el(
+			"div",
+			"vi-ew-hint",
+			null,
+			"No URL saved. Use the gadget’s Settings (gear icon) or the inline ✏️ popover to configure an embed URL. Example: https://example.com or file:///C:/path/to/local.html"
+		);
+
+		root.append(handle, body, hint);
+
+		// --- hover & click behaviour for handle/tools ---
 		handle.addEventListener("mouseenter", expand);
 		handle.addEventListener("mouseleave", () => collapseSoon(2000));
 		tools.addEventListener("mouseenter", expand);
@@ -324,7 +381,102 @@
 		applyDebug();
 		render(initial.url || "");
 
-		// --- helpers inside mount ---
+		// -----------------------------------------------------------------
+		// Inline popover editor (✏️) — URL / buffer / debug
+		// -----------------------------------------------------------------
+
+		pop = el("div", "vi-ew-pop");
+		const popForm = document.createElement("form");
+
+		const popUrlRow = document.createElement("div");
+		const popUrlLabel = document.createElement("label");
+		popUrlLabel.textContent = "Embed URL";
+		const popUrlInput = document.createElement("input");
+		popUrlInput.type = "text";
+		popUrlInput.value = initial.url || "";
+		popUrlInput.placeholder = "https://example.com or file:///C:/path/to/local.html";
+		popUrlRow.appendChild(popUrlLabel);
+		popUrlRow.appendChild(popUrlInput);
+
+		const popBufferRow = document.createElement("div");
+		const popBufferLabel = document.createElement("label");
+		popBufferLabel.textContent = "Toolbar buffer (px)";
+		const popBufferSelect = document.createElement("select");
+		[0, 2, 4, 6, 8, 12].forEach((v) => {
+			const opt = document.createElement("option");
+			opt.value = String(v);
+			opt.textContent = v + " px";
+			popBufferSelect.appendChild(opt);
+		});
+		const initialBuf = typeof initial.bufferPx === "number" ? initial.bufferPx : 3;
+		popBufferSelect.value = String(initialBuf);
+		popBufferRow.appendChild(popBufferLabel);
+		popBufferRow.appendChild(popBufferSelect);
+
+		const popDebugRow = document.createElement("div");
+		const popDebugChk = document.createElement("input");
+		popDebugChk.type = "checkbox";
+		popDebugChk.id = "vi-ew-debug-toggle-popover";
+		popDebugChk.checked =
+			typeof initial.debugColors === "boolean"
+				? initial.debugColors
+				: DEBUG_COLORS;
+		const popDebugLabel = document.createElement("label");
+		popDebugLabel.textContent = "Debug colors (rainbow)";
+		popDebugLabel.htmlFor = popDebugChk.id;
+		popDebugRow.appendChild(popDebugChk);
+		popDebugRow.appendChild(popDebugLabel);
+
+		const popButtonsRow = document.createElement("div");
+		popButtonsRow.className = "vi-ew-pop-buttons";
+		const popSaveBtn = document.createElement("button");
+		popSaveBtn.type = "submit";
+		popSaveBtn.textContent = "Save";
+		const popCancelBtn = document.createElement("button");
+		popCancelBtn.type = "button";
+		popCancelBtn.textContent = "Cancel";
+		popButtonsRow.appendChild(popCancelBtn);
+		popButtonsRow.appendChild(popSaveBtn);
+
+		popForm.appendChild(popUrlRow);
+		popForm.appendChild(popBufferRow);
+		popForm.appendChild(popDebugRow);
+		popForm.appendChild(popButtonsRow);
+
+		popForm.addEventListener("submit", (e) => {
+			e.preventDefault();
+			const url = (popUrlInput.value || "").trim();
+			const bufferPx = parseInt(popBufferSelect.value, 10) || 0;
+			const debugColors = !!popDebugChk.checked;
+
+			S.set({ url, bufferPx, debugColors });
+			applyBuffer();
+			applyDebug();
+			render(url);
+			hidePopover();
+			collapseSoon(800);
+		});
+
+		popCancelBtn.addEventListener("click", () => {
+			hidePopover();
+			collapseSoon(800);
+		});
+
+		// Keep iframe disabled while popover active (already handled by tools-open)
+		pop.addEventListener("mouseenter", expand);
+		pop.addEventListener("mouseleave", () => collapseSoon(2000));
+
+		pop.appendChild(popForm);
+		root.appendChild(pop);
+
+		// Wire ✏️ button to popover toggle
+		tEdit.addEventListener("click", (e) => {
+			e.stopPropagation();
+			expand();
+			togglePopover();
+		});
+
+		// --- helpers inside mount --- //
 		function render(url) {
 			hideError();
 			if (!url) {
@@ -495,7 +647,7 @@
 			const debugColors = !!debugChk.checked;
 
 			S.set({ url, bufferPx, debugColors });
-			// Portal is responsible for re-mounting or re-rendering with updated settings.
+			// Portal/chrome own whether to re-mount/refresh the instance on settings save.
 		});
 
 		host.appendChild(form);
