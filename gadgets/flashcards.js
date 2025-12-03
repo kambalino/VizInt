@@ -1,6 +1,7 @@
 // gadgets/flashcards.js
-// $VER: FlashCards v0.3.1 — toolbar button on/off styling; smaller buttons; settings click-to-toggle
+// $VER: FlashCards v0.3.2 — 3D-style toggle buttons; keep hidden config hook for chrome
 // $HISTORY:
+//   v0.3.2 — 3D-style toggle buttons; keep hidden config hook for chrome
 //   v0.3.1 — toolbar button on/off styling; smaller buttons; settings click-to-toggle
 //   v0.3.0 — toolbar 🆎 answer-display toggle; hide in-gadget settings button
 //   v0.2.9 — auto-reparse on mount; parseCSV instrumentation; silent toggleConfig after save
@@ -12,9 +13,9 @@
 		_class: "FlashCards",
 		_type: "singleton",
 		_id: "Local",
-		_ver: "v0.3.1",
+		_ver: "v0.3.2",
 		verblurb:
-			"toolbar button on/off styling; smaller buttons; settings click-to-toggle",
+			"3D-style toggle buttons; keep hidden config hook for chrome",
 		label: "Flash Cards",
 		iconEmoji: "🎓",
 		capabilities: ["network"], // URL fetch (paste works offline)
@@ -865,7 +866,8 @@
 				}
 				if (autoBtn) {
 					const on = !!my.auto;
-					autoBtn.classList.toggle("is-on", on);
+					///! This doesn't need a visual recessed toggle as the button itself changes.
+					//autoBtn.classList.toggle("is-on", on);
 					autoBtn.setAttribute("aria-pressed", on ? "true" : "false");
 				}
 				if (flipModeBtn) {
@@ -1313,17 +1315,18 @@
 			min-width:0;
 		}
 
-		/* visual pressed / toggled state for mode/auto/flipmode */
+		/* visual pressed / toggled state for mode/auto/flipmode 
+		   – use a slightly "recessed" 3D look instead of circular highlight */
 		.fc-controls .gbtn.is-on {
-			outline:1px solid currentColor;
-			border-radius:999px;
-			box-shadow:0 0 0 1px rgba(255,255,255,0.15);
+			box-shadow: inset 0 2px 3px rgba(0,0,0,0.6);
+			transform: translateY(1px);
 		}
 		.fc-controls .gbtn:active {
-			transform:translateY(1px);
-			opacity:0.75;
+			box-shadow: inset 0 2px 3px rgba(0,0,0,0.6);
+			transform: translateY(1px);
 		}
 
+		/* internal hook for chrome/info settings click; never user-visible */
 		.fc-config-hidden {
 			display:none;
 		}
