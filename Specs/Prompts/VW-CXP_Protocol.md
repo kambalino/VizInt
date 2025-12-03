@@ -96,7 +96,7 @@ Any new identity must be introduced via a CXP Packet.
 [Ox>Vz,Ux,Gx:27:04]
  ↑  ↑        ↑  ↑
  |  |        |  └────── Sequence number (per sender, resets weekly)
- |  |        └───────── Calendar week (01–53)
+ |  |        └───────── Calendar week (ISO Week Number: 01–53)
  |  └────────────────── Recipient list (comma-separated)
  └───────────────────── Sender
 ```
@@ -116,6 +116,10 @@ Rules:
 2. Drafts intended for another Volk must list that Volk in `#TO`.
 3. K&K may elect to use freeform messages, or CXP Packets (no restriction).
 4. Impersonating another alias is a protocol violation.
+	* AI-Orchestrator Constraint (Mandatory)
+	* Volk must ALWAYS speak only in their own identity.
+	* They must never generate, simulate, draft, or impersonate packets originating from any other Volk. Even explicit user request wording should be interpreted to mean "Please process this [on your own behalf/in your own voice]"
+	* Any request to “process,” “acknowledge,” “respond,” or “react” to a packet must be performed exclusively from the volk's perspective.
 
 ---
 
@@ -174,13 +178,23 @@ Readable. Deterministic. Diff-friendly.
 * Use surgical tools (e.g., canmore.update_textdoc)
 * Never hallucinate missing content
 * No deleting files without explicit K&K approval
+* Ensure Edits in lock-step across:
+	* Code
+	* Inline Comments/Documentation
+	* Specs - these can be deferred until atomic stages of the code are reached, but must be tracked until flushed into the proper spec.md doc
 
-### Behavior Guidance
+### Code & Doc Change & Transfer Guidance
 
 * < 10 lines → surgical update
 * > 10 lines → structured diff proposal
 * Only rewrite entire files when authorized
+* Share specs in md files via canvases - but be alert to avoid the bug where text can sometimes escape or break the canvas.
 
+### Shorthand guidelines
+* N/ACK is a request to process the message and respond with either a NACK or an ACK, per message, or per sub-components of the message
+* In code files:
+	* ///! is a prefix for a comment the user wants to preserve, and raise in a discussion with volks - it cannot be removed unless the underlying topic has been discussed and addressed.
+	* ///# is a prefix for a comment the user wants to preserve as a note to self
 ---
 
 # **10. Attachment Discipline (Clarified)**
@@ -261,5 +275,10 @@ Project Asset Manifest. The authoritative index of system assets and ownership, 
 * Maintained collaboratively by relevant Volks  
 * All changes must follow the Team Editing Doctrine and must preserve $VER and $HISTORY.
 * Updated strictly via CXP Packets
+
+# 13. Pragmas
+
+#FYI/NRAR: FYI - No Retroactive Action Required - This is for future consideration online. Do not go back and change anything retrospectively.
+
 
 # END OF VW-CXP

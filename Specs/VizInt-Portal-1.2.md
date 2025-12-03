@@ -84,6 +84,31 @@ If a manifest is missing:
 
 ---
 
+### Descriptor Requirements for Multi-Instance Gadgets (Authoritative v1.2.x)
+
+Portal MUST generate a descriptor object for every gadget instance.  
+For multi-instance gadgets, each descriptor must include at minimum:
+
+- `classId`
+- `instanceId`
+- `displayName`
+- `capabilities`
+- `badges` (derived from capabilities)
+- `layoutState` (collapsed, spanWide, fullscreen)
+- any additional chrome-relevant metadata
+
+chrome.js renders UI strictly from descriptor content.
+
+Portal is responsible for keeping descriptors in sync when:
+- instances are created or deleted
+- names are edited
+- order changes
+- layout changes
+- settings migrate
+
+Descriptors are the single source of truth for gadget chrome.
+
+
 # 3. Portal Context Injection (`ctx`)
 
 A mounted gadget receives:
@@ -115,6 +140,7 @@ ctx = {
 
 # 4. Storage Model (Portal Implementation)
 
+## 4.1 Storage Persistance, Deletion & Movement
 The Portal MUST implement storage as:
 
 ```
@@ -147,6 +173,29 @@ Bulk deletion:
 
 * Per-instance
 * Per-class
+
+When Gadget Instances are renamed:
+
+* The gadget needs to support moving their settings across the relevant namespace buckets.
+
+## 4.2 Optional UX Enhancements (Non-Normative)
+
+The following behaviors are **optional** and MAY be implemented by U:Ux to improve
+the usability and polish of multi-instance gadget management. These guidelines are
+informational only and do not affect the authoritative authoring contract.
+
+**UX MAY:**
+
+- **Auto-focus the new instance name field** immediately after the user clicks ➕  
+  This allows instant renaming without requiring an additional click.
+
+- Provide a **subtle vertical visual guide** connecting a class row and its instance
+  rows (e.g., a faint dotted line or indentation marker).  
+  This may improve clarity in dense dashboards but is not required for correctness.
+
+Both enhancements should remain stylistically lightweight and must not modify
+runtime behavior, descriptor semantics, or instance ordering logic.
+
 
 ---
 
@@ -296,6 +345,92 @@ Portal MUST support:
 
 Portal MAY expose advanced features in the future.
 
+
+## Multi-Instance Settings UI Contract (Authoritative, v1.2.x)
+
+This section defines the canonical behavior of how Portal and chrome.js present and manage multi-instance gadgets in the Settings Manager.
+
+### 1. Class Row (Parent Row)
+
+Layout:
+
+[ + ]   [Class Icon]   {Gadget Class Name}   [Badges…]   [↑] [↓]
+
+Rules:
+
+- Class row is not an instance (no checkbox).
+- The ➕ button creates a new instance.
+- Class-level badges represent class capabilities.
+- Arrows [↑][↓] reorder the entire class block among other gadgets.
+- Instance rows appear directly below their class.
+
+### 2. Instance Rows
+
+Layout:
+
+[ – ]  [☐]  [Icon]  {Instance Name (editable)}   [Badges…]   [↑] [↓]
+
+Rules:
+
+- Remove (–) triggers a confirmation modal before deletion.
+- Checkbox controls show/hide of that instance.
+- Label → textbox on click (✓/✖/Enter/Escape semantics).
+- Empty names are forbidden.
+- Badges align with the global badge grid.
+- Arrows reorder instances only within the class block.
+
+### 3. Instantiation Rules
+
+When the user presses ➕:
+
+- Portal allocates a new instanceId.
+- The default name is generated as:
+
+  {Class Name} #nn
+
+- A new instance row appears directly under the class row.
+- The instance catalog is updated.
+- A fresh descriptor is generated and passed to chrome.js.
+- Namespace is created:
+
+  vz:gadgets/{classId}/{instanceId}/*
+
+### 4. Deletion Rules
+
+Deleting an instance must:
+
+- show a confirmation modal  
+- delete the instance namespace  
+- update the instance catalog  
+- rebuild descriptors  
+- refresh chrome  
+
+### 5. Renaming Rules
+
+- Click label → textbox.
+- ✓ or Enter commits.
+- ✖ or Escape cancels.
+- Empty names are rejected.
+- Renames update instance catalog + descriptors.
+
+### 6. Reordering Rules
+
+- Class arrows move entire class blocks.
+- Instance arrows move only within their block.
+- Ordering persists in settings.
+- chrome.js must render the new order deterministically.
+
+### 7. Badge Grid Alignment
+
+All badges must align in a single fixed grid across:
+
+- class rows
+- instance rows
+- single-instance gadgets
+
+Badge order is canonical and derived from capability categories.
+
+
 ---
 
 # 12. File Policy
@@ -318,6 +453,21 @@ Portal MUST:
 
 Legacy gadgets SHOULD be migrated by U:Factory.
 
+---
+# 13. Portal Settings UI
+
+  │      [☑] [icon] Class Name					  	[Badges]	[↕] [⚙️]
+  │      [☐] [icon] Class Name						[Badges]	[↕] [⚙️]
+  │      [☑] [icon] Class Name						[Badges]	[↕] [⚙️]
+  │      [+] [icon] Class Name						[Badges]	[↕]			// Multi-instance gadget listing, clicking the [+] button ad another instance
+  │      [–] [☑] [icon] Instance Name	[🖊️][✖️]	[Badges]	[↕] [⚙️]
+  │      [–] [☑] [icon] Instance Name	[🖊️][✖️]	[Badges]	[↕] [⚙️]
+  │      [–] [☑] [icon] Instance Name	[🖊️][✖️]	[Badges]	[↕] [⚙️]
+  │      [☑] [icon] Class Name						[Badges]	[↕] [⚙️]
+  │      [☑] [icon] Class Name						[Badges]	[↕] [⚙️]
+  │      [–] [☑] [icon] Instance Name	[🖊️][✖️]	[Badges]	[↕] [⚙️]	// instance of multi-instance gadget that was moved [↕] away to a different rendering order away from its parent by tinkering with the up/down buttons
+  │      [☑] [icon] Class Name						[Badges]	[↕] [⚙️]
+  
 ---
 
 # 14. Compliance Rules

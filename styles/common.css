@@ -255,3 +255,63 @@ body.dark .gpop-sep { border-top-color: rgba(255,255,255,.08); }
   justify-content: center;
   line-height: 1;
 }
+.vi-modal-overlay {
+  position: fixed;      /* cover viewport */
+  inset: 0;             /* top:0; right:0; bottom:0; left:0; */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);  /* dim background (same in both themes) */
+  z-index: 9999;        /* above dock & gadgets */
+}
+
+/* Panel follows the current theme card vars */
+.vi-modal-panel {
+  min-width: 60%;
+  max-width: 90%;
+  max-height: 80%;
+  background: var(--card-bg);
+  color: var(--fg);
+  border-radius: 8px;
+  border: 1px solid var(--card-border);
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Simple header bar */
+.vi-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+body.dark .vi-modal-header {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.vi-modal-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+/* Body scrolls but inherits colors */
+.vi-modal-body {
+  overflow: auto;
+  padding: 0.75rem 1rem 1rem;
+  background: inherit;
+  color: inherit;
+}
+
+/* Modal close button always tiny and compact */
+.vi-modal-header .vi-modal-close {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 1;
+  border-radius: 3px;
+}
+
