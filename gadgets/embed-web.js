@@ -1,10 +1,11 @@
 /*
  *
- *  $VER: EmbedWeb 1.2.2
+ *  $VER: EmbedWeb 1.2.3
  * 
  *  ///! MERGE HISTORIES BELOW
  * 
  *  $HISTORY:
+ *  	2025/12/10 1.2.3	Settings gear now delegates to the ✏️ inline popover; second gear-click closes it; pruned legacy settings-shell code (U:Fx)
  *  	2025/11/30 1.2.2	Restored ✏️ popover editor + debug checkbox alongside Settings; popover submit now updates settings + live instance (U:Fx)
  *  	2025/11/30 1.2.1	Converted to multi-instance gadget, v1.2 manifest, Settings-driven URL config (U:Fx)
  *  	2025/10/01 0.3.6	Debug checkbox in popover; debugColors persisted in settings (U:Vz)
@@ -64,7 +65,7 @@
 		_class: "EmbedWeb",          // canonical class identity (Portal will normalize)
 		_type: "multi",              // multi-instance gadget
 		_id: "default",              // internal variant id (kept simple for now)
-		_ver: "v1.2.2",
+		_ver: "v1.2.3",
 		label: "Custom Embed",
 		iconEmoji: "🌐",
 		description:
@@ -284,7 +285,7 @@
 			}
 		};
 
-		// Forward-declared so the ✏️ handler can call it before pop is constructed.
+		// Forward-declared so the ✏️ handler + settings gear can call it
 		function showPopover() {
 			if (!pop) return;
 			pop.classList.add("show");
@@ -333,7 +334,7 @@
 
 		root.append(handle, body, hint);
 
-		// --- hover & click behaviour for handle/tools ---
+		// --- hover & click behaviour for handle/tools --- //
 		handle.addEventListener("mouseenter", expand);
 		handle.addEventListener("mouseleave", () => collapseSoon(2000));
 		tools.addEventListener("mouseenter", expand);
@@ -508,6 +509,14 @@
 			return b;
 		}
 
+		// expose a tiny per-instance API for chrome / Info / Settings
+		root.__api = {
+			toggleBar,
+			togglePopover,
+			showPopover,
+			hidePopover
+		};
+
 		// per-instance teardown with timer cleanup
 		root.__vi_unmount = () => {
 			try {
@@ -526,130 +535,51 @@
 		if (root && root.__vi_unmount) root.__vi_unmount();
 	}
 
-	// Title-bar icon click → open/close toolbar
+	// Title-bar icon click → open/close toolbar (if API is present)
 	function onInfoClick(ctx, { body }) {
 		try {
-			body &&
-				body.__api &&
-				typeof body.__api.toggleBar === "function" &&
+			if (body && body.__api && typeof body.__api.toggleBar === "function") {
 				body.__api.toggleBar(true);
+				return;
+			}
 		} catch (e) {
 			// if this fails, loader will show legacy Info dialog instead
 		}
 	}
 
 	// ---------------------------------------------------------------------
-	// Settings Panel (gear icon) — URL / buffer / debug
+	// Settings Panel (gear icon) — delegate to inline ✏️ popover
 	// ---------------------------------------------------------------------
 
-	function onSettingsRequested(ctx, shell) {
-		const S = createSettingsAdapter(ctx);
-		const current = S.get() || {};
+	function onSettingsRequested(ctx, shell = {}) {
+		// We do NOT build a separate modal here.
+		// Instead, we delegate to the existing inline ✏️ popover
+		// so that:
+		// - first gear-click opens it
+		// - second gear-click closes it
+		// - Save/Cancel inside the popover close it and return to the gadget
 		const host = (shell && (shell.body || shell.slot)) || null;
-		if (!host) return;
+		const body = host || null;
+		if (!body) return;
 
-		host.innerHTML = "";
+		const root =
+			(body.closest && body.closest(".vi-embedweb")) ||
+			(body.querySelector && body.querySelector(".vi-embedweb")) ||
+			null;
+		if (!root) return;
 
-		const form = document.createElement("form");
-		form.className = "vi-ew-settings";
+		// Prefer the explicit instance API if present
+		if (root.__api && typeof root.__api.togglePopover === "function") {
+			root.__api.togglePopover();
+			return;
+		}
 
-		// URL row
-		const urlRow = document.createElement("div");
-		urlRow.style.display = "flex";
-		urlRow.style.flexDirection = "column";
-		urlRow.style.gap = "2px";
-		urlRow.style.marginBottom = "6px";
-
-		const urlLabel = document.createElement("label");
-		urlLabel.textContent = "Embed URL";
-		urlLabel.style.fontSize = "11px";
-
-		const urlInput = document.createElement("input");
-		urlInput.type = "text";
-		urlInput.value = current.url || "";
-		urlInput.placeholder = "https://example.com or file:///C:/path/to/local.html";
-		urlInput.style.width = "100%";
-		urlInput.style.boxSizing = "border-box";
-
-		urlRow.appendChild(urlLabel);
-		urlRow.appendChild(urlInput);
-
-		// Buffer row
-		const bufferRow = document.createElement("div");
-		bufferRow.style.display = "flex";
-		bufferRow.style.alignItems = "center";
-		bufferRow.style.gap = "4px";
-		bufferRow.style.marginBottom = "6px";
-
-		const bufferLabel = document.createElement("label");
-		bufferLabel.textContent = "Toolbar buffer (px):";
-		bufferLabel.style.fontSize = "11px";
-		bufferLabel.style.whiteSpace = "nowrap";
-
-		const bufferSelect = document.createElement("select");
-		bufferSelect.style.fontSize = "11px";
-		[0, 2, 4, 6, 8, 12].forEach((v) => {
-			const opt = document.createElement("option");
-			opt.value = String(v);
-			opt.textContent = v + " px";
-			bufferSelect.appendChild(opt);
-		});
-		const currentBuf = typeof current.bufferPx === "number" ? current.bufferPx : 3;
-		bufferSelect.value = String(currentBuf);
-
-		bufferRow.appendChild(bufferLabel);
-		bufferRow.appendChild(bufferSelect);
-
-		// Debug row
-		const debugRow = document.createElement("div");
-		debugRow.style.display = "flex";
-		debugRow.style.alignItems = "center";
-		debugRow.style.gap = "4px";
-		debugRow.style.marginBottom = "8px";
-
-		const debugChk = document.createElement("input");
-		debugChk.type = "checkbox";
-		debugChk.id = "vi-ew-debug-toggle-settings";
-		debugChk.checked =
-			typeof current.debugColors === "boolean"
-				? current.debugColors
-				: DEBUG_COLORS;
-
-		const debugLabel = document.createElement("label");
-		debugLabel.textContent = "Debug colors (rainbow)";
-		debugLabel.htmlFor = debugChk.id;
-		debugLabel.style.fontSize = "11px";
-
-		debugRow.appendChild(debugChk);
-		debugRow.appendChild(debugLabel);
-
-		// Save row
-		const buttonsRow = document.createElement("div");
-		buttonsRow.style.display = "flex";
-		buttonsRow.style.justifyContent = "flex-end";
-		buttonsRow.style.gap = "6px";
-
-		const saveBtn = document.createElement("button");
-		saveBtn.type = "submit";
-		saveBtn.textContent = "Save";
-
-		buttonsRow.appendChild(saveBtn);
-
-		form.appendChild(urlRow);
-		form.appendChild(bufferRow);
-		form.appendChild(debugRow);
-		form.appendChild(buttonsRow);
-
-		form.addEventListener("submit", (e) => {
-			e.preventDefault();
-			const url = (urlInput.value || "").trim();
-			const bufferPx = parseInt(bufferSelect.value, 10) || 0;
-			const debugColors = !!debugChk.checked;
-
-			S.set({ url, bufferPx, debugColors });
-			// Portal/chrome own whether to re-mount/refresh the instance on settings save.
-		});
-
-		host.appendChild(form);
+		// Fallback: try to click the ✏️ button directly
+		const editBtn =
+			root.querySelector(".vi-ew-tools .vi-ew-toolbtn") ||
+			root.querySelector(".vi-ew-toolbtn");
+		if (editBtn) {
+			editBtn.click();
+		}
 	}
 })();
