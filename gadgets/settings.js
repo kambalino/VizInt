@@ -294,11 +294,6 @@
 		window.SettingsRuntime = SettingsRuntime;
 	}
 
-
-	if (typeof window !== 'undefined') {
-		window.SettingsRuntime = SettingsRuntime;
-	}
-
 	// =========== Settings gadget ===========
 	function mount(host, ctx) {
 	
@@ -423,61 +418,6 @@
 		// Append MI section into the same root container as the rest of the gadget
 		root.appendChild(miSection);
 
-		/// Keep the manager wired so state stays in sync; UI is just hidden for now
-		buildMultiInstanceManager(miBody);
-
-
-		function getInstanceCatalogSafe() {
-			if (!window.SettingsRuntime || typeof window.SettingsRuntime.getInstanceCatalog !== 'function') {
-				return {};
-			}
-			try {
-				return window.SettingsRuntime.getInstanceCatalog() || {};
-			} catch (err) {
-				console.error('[Settings] getInstanceCatalogSafe failed', err);
-				return {};
-			}
-		}
-
-		function renderList() {
-			const s = getSettings();
-			const enabled = new Set(s.enabledGadgets || []);
-			const userGadgets = computeUserGadgetList();
-			const instanceCatalog = getInstanceCatalogSafe();
-
-			ul.innerHTML = userGadgets.map(g => `
-        <li data-id="${g.id}" class="set-row grid8">
-          <!-- On -->
-          <div class="cell c-chk">
-            <input type="checkbox" ${enabled.has(g.id) ? 'checked' : ''} aria-label="Enable ${escapeHtml(g.label)}">
-          </div>
-
-          <!-- Icon / Info (LEFT of name) -->
-          <div class="cell c-ico">
-            <span class="info-hook g-iconbox is-interactive" role="button" tabindex="0" aria-label="Show gadget info">ℹ️</span>
-          </div>
-
-          <!-- Name (truncated; tooltip with full name) -->
-          <div class="cell c-name">
-            <span class="g-label truncate" title="${escapeHtml(g.label)}">${escapeHtml(g.label)}</span>
-          </div>
-
-          <!-- Capabilities columns (emoji chips only) -->
-          <div class="cell c-cap cap1"></div>
-          <div class="cell c-cap cap2"></div>
-          <div class="cell c-cap cap3"></div>
-
-          <!-- Up/Down -->
-          <div class="cell c-up"><button class="gbtn gbtn-xs move-up"   aria-label="Move up">▲</button></div>
-          <div class="cell c-dn"><button class="gbtn gbtn-xs move-down" aria-label="Move down">▼</button></div>
-        </li>
-      `).join('');
-
-			// Decorate rows and, for multi-instance classes, inject children
-			Array.from(ul.children).forEach(li => decorateRow(li, instanceCatalog));
-		}
-
-
 		/// Inline child rows rendered immediately under their multi-instance class row
 		function injectMiChildren(parentLi, classId, manifest, instanceCatalog) {
 			if (!classId) return;
@@ -493,70 +433,66 @@
 				if (!rec) return;
 
 				const name = rec.displayName || instanceId;
-				const li = document.createElement('li');
+				const li   = document.createElement('li');
 				li.className = 'set-row grid8 mi-child-row';
-				li.dataset.miChild   = '1';
-				li.dataset.classId   = classId;
+				li.dataset.miChild    = '1';
+				li.dataset.classId    = classId;
 				li.dataset.instanceId = instanceId;
 
 				const iconEmoji = manifest.iconEmoji || manifest.icon || '🔁';
 
 				li.innerHTML = `
-          <div class="cell c-chk">
-            <button class="gbtn gbtn-xs mi-remove" aria-label="Remove instance">−</button>
-            <input type="checkbox"
-                   class="mi-vis"
-                   ${rec.visible !== false ? 'checked' : ''}
-                   aria-label="Show/hide instance">
-          </div>
-          <div class="cell c-ico">
-            <span class="g-iconbox mi-icon">${escapeHtml(iconEmoji)}</span>
-          </div>
-          <div class="cell c-name">
-            <span class="g-label truncate mi-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
-          </div>
-          <div class="cell c-cap cap1"></div>
-          <div class="cell c-cap cap2"></div>
-          <div class="cell c-cap cap3"></div>
-          <div class="cell c-up"><button class="gbtn gbtn-xs mi-up"   aria-label="Move instance up">▲</button></div>
-          <div class="cell c-dn"><button class="gbtn gbtn-xs mi-down" aria-label="Move instance down">▼</button></div>
-        `;
+				<div class="cell c-chk">
+					<button class="gbtn gbtn-xs mi-remove" aria-label="Remove instance">−</button>
+				</div>
+				<div class="cell c-ico">
+					<span class="g-iconbox mi-icon">${escapeHtml(iconEmoji)}</span>
+				</div>
+				<div class="cell c-name">
+					<span class="g-label truncate mi-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
+				</div>
+				<div class="cell c-cap cap1"></div>
+				<div class="cell c-cap cap2"></div>
+				<div class="cell c-cap cap3"></div>
+				<div class="cell c-up"><button class="gbtn gbtn-xs mi-up"   aria-label="Move instance up">▲</button></div>
+				<div class="cell c-dn"><button class="gbtn gbtn-xs mi-down" aria-label="Move instance down">▼</button></div>
+				`;
 
 				insertAfter.parentNode.insertBefore(li, insertAfter.nextSibling);
 				insertAfter = li;
 
-				/// Inline instance events (reuse the same Portal APIs as buildMultiInstanceManager)
 				if (portal) {
-					const btnRemove   = li.querySelector('.mi-remove');
-					const visCheckbox = li.querySelector('.mi-vis');
-					const nameSpan    = li.querySelector('.mi-name');
-					const btnUp       = li.querySelector('.mi-up');
-					const btnDown     = li.querySelector('.mi-down');
+					const btnRemove = li.querySelector('.mi-remove');
+					const nameSpan  = li.querySelector('.mi-name');
+					const btnUp     = li.querySelector('.mi-up');
+					const btnDown   = li.querySelector('.mi-down');
+
+					// Make − tiny
+					if (btnRemove) {
+						btnRemove.style.padding   = '0 4px';
+						btnRemove.style.fontSize  = '10px';
+						btnRemove.style.minWidth  = 'auto';
+					}
 
 					btnRemove?.addEventListener('click', () => {
 						const ok = window.confirm(
 							'Are you sure you want to permanently delete this instance and all its settings?'
 						);
 						if (!ok) return;
-						try { portal.removeInstance(classId, instanceId); }
-						catch (err) { console.error('[Settings] removeInstance failed', err); }
+						try {
+							portal.removeInstance(classId, instanceId);
+						} catch (err) {
+							console.error('[Settings] removeInstance failed', err);
+						}
 					});
 
-					if (visCheckbox) {
-						visCheckbox.addEventListener('change', () => {
-							if (typeof portal.setInstanceVisibility === 'function') {
-								try { portal.setInstanceVisibility(classId, instanceId, visCheckbox.checked); }
-								catch (err) { console.error('[Settings] setInstanceVisibility failed', err); }
-							} else {
-								console.warn('[Settings] Visibility checkbox is visual only; Portal.setInstanceVisibility is not implemented.');
-							}
-						});
-					}
+					const triggerRename = () => {
+						beginInlineRename(li, classId, instanceId, nameSpan?.textContent || '');
+					};
 
 					if (nameSpan) {
-						nameSpan.addEventListener('click', () => {
-							beginInlineRename(li, classId, instanceId, nameSpan.textContent || '');
-						});
+						nameSpan.style.cursor = 'text';
+						nameSpan.addEventListener('click', triggerRename);
 					}
 
 					btnUp?.addEventListener('click', () => {
@@ -789,6 +725,10 @@
 				btnAdd.className = 'gbtn gbtn-xs mi-add';
 				btnAdd.textContent = '+';
 				btnAdd.title = 'Add a new instance of this gadget';
+				// Make [+] as small as possible, consistent with design language
+				btnAdd.style.padding  = '0 4px';
+				btnAdd.style.fontSize = '10px';
+				btnAdd.style.minWidth = 'auto';
 				chkCell.appendChild(btnAdd);
 
 				btnAdd.addEventListener('click', () => {
@@ -798,15 +738,37 @@
 					}
 					const classKey = (m && m._class) || id;
 					try {
+						// Create a new instance; we don't rely on the return value
 						portal.addInstance(classKey, { displayName: null });
+
+						// Refresh the list so the new child row appears
+						renderList();
+
+						// After DOM updates, focus the last child row for this class and start inline rename
+						requestAnimationFrame(() => {
+							const rows = root.querySelectorAll(`li.mi-child-row[data-class-id="${classKey}"]`);
+							if (!rows.length) return;
+							const row = rows[rows.length - 1];
+							if (!row) return;
+
+							const instanceId = row.dataset.instanceId;
+							const nameSpan   = row.querySelector('.mi-name');
+							const current    = nameSpan ? (nameSpan.textContent || '') : '';
+
+							if (instanceId) {
+								beginInlineRename(row, classKey, instanceId, current);
+							}
+						});
 					} catch (err) {
 						console.error('[Settings] addInstance failed for', classKey, err);
 					}
 				});
 
-				// also inject existing children under this class row
+
+				// Inject existing instances for this class under the main row
 				const classKey = (m && m._class) || id;
 				injectMiChildren(li, classKey, m, instanceCatalog);
+
 			})();
 
 			function writeCapCell(cell, capName) {
@@ -883,6 +845,43 @@
 			}));
 		}
 
+		function renderList() {
+			const s = getSettings();
+			const enabled = new Set(s.enabledGadgets || []);
+			const userGadgets = computeUserGadgetList();
+			const instanceCatalog = getInstanceCatalogSafe();
+
+			ul.innerHTML = userGadgets.map(g => `
+        <li data-id="${g.id}" class="set-row grid8">
+          <!-- On -->
+          <div class="cell c-chk">
+            <input type="checkbox" ${enabled.has(g.id) ? 'checked' : ''} aria-label="Enable ${escapeHtml(g.label)}">
+          </div>
+
+          <!-- Icon / Info (LEFT of name) -->
+          <div class="cell c-ico">
+            <span class="info-hook g-iconbox is-interactive" role="button" tabindex="0" aria-label="Show gadget info">ℹ️</span>
+          </div>
+
+          <!-- Name (truncated; tooltip with full name) -->
+          <div class="cell c-name">
+            <span class="g-label truncate" title="${escapeHtml(g.label)}">${escapeHtml(g.label)}</span>
+          </div>
+
+          <!-- Capabilities columns (emoji chips only) -->
+          <div class="cell c-cap cap1"></div>
+          <div class="cell c-cap cap2"></div>
+          <div class="cell c-cap cap3"></div>
+
+          <!-- Up/Down -->
+          <div class="cell c-up"><button class="gbtn gbtn-xs move-up"   aria-label="Move up">▲</button></div>
+          <div class="cell c-dn"><button class="gbtn gbtn-xs move-down" aria-label="Move down">▼</button></div>
+        </li>
+      `).join('');
+
+			// Decorate rows and, for multi-instance classes, inject children
+			Array.from(ul.children).forEach(li => decorateRow(li, instanceCatalog));
+		}
 
 		// Move up/down & checkbox changes for main rows
 		ul.addEventListener('click', e => {
@@ -945,58 +944,115 @@
 			}
 		});
 
-chkFold.addEventListener('change', () => {
-  const folded = !!chkFold.checked;
+		chkFold.addEventListener('change', () => {
+			const folded = !!chkFold.checked;
 
-  const current = getSettings() || {};
-  const next = {
-    ...current,
-    foldedHubControls: folded
-  };
+			const current = getSettings() || {};
+			const next = {
+				...current,
+				foldedHubControls: folded
+			};
 
-  setSettings(next);
+			setSettings(next);
 
-  window.dispatchEvent(new CustomEvent('gadgets:update', {
-    detail: { enabled: next.enabledGadgets }
-  }));
+			window.dispatchEvent(new CustomEvent('gadgets:update', {
+				detail: { enabled: next.enabledGadgets }
+			}));
 
-  showToast(
-    folded ? 'Window controls folded under 💠' : 'Window controls expanded',
-    'info',
-    2000
-  );
-});
+			showToast(
+				folded ? 'Window controls folded under 💠' : 'Window controls expanded',
+				'info',
+				2000
+			);
+		});
 
 		window.addEventListener('registry:updated', () => renderList());
+
+		// Keep inline MI rows in sync with Portal mutations
+		window.addEventListener('portal:gadgetInstancesChanged', () => renderList());
+		window.addEventListener('portal:gadgetRenamed',          () => renderList());
 
 		function beginInlineRename(row, classId, instanceId, currentName) {
 			const nameSpan = row.querySelector('.mi-name');
 			if (!nameSpan || !portal) return;
 
+			// Avoid duplicate editors on the same row
 			if (row.querySelector('input.vi-mi-name-edit')) return;
+
+			const wrapper = document.createElement('div');
+			wrapper.className = 'vi-mi-rename-wrap';
+			// Layout: input + ✓ + × horizontally
+			wrapper.style.display = 'flex';
+			wrapper.style.alignItems = 'center';
+			wrapper.style.gap = '4px';
 
 			const input = document.createElement('input');
 			input.type = 'text';
 			input.className = 'vi-mi-name-edit';
 			input.value = currentName;
 			input.setAttribute('maxlength', '64');
+			// Make it compact but flexible
+			input.style.flex = '1';
+			input.style.minWidth = '0';
 
-			nameSpan.replaceWith(input);
+			const btnOk = document.createElement('button');
+			btnOk.type = 'button';
+			btnOk.className = 'gbtn gbtn-xs vi-mi-rename-ok';
+			btnOk.textContent = '✓';
+			btnOk.title = 'Rename instance';
+			btnOk.style.padding  = '0 4px';
+			btnOk.style.fontSize = '10px';
+			btnOk.style.minWidth = 'auto';
+
+			const btnCancel = document.createElement('button');
+			btnCancel.type = 'button';
+			btnCancel.className = 'gbtn gbtn-xs vi-mi-rename-cancel';
+			btnCancel.textContent = '×';
+			btnCancel.title = 'Cancel rename';
+			btnCancel.style.padding  = '0 4px';
+			btnCancel.style.fontSize = '10px';
+			btnCancel.style.minWidth = 'auto';
+
+			wrapper.appendChild(input);
+			wrapper.appendChild(btnOk);
+			wrapper.appendChild(btnCancel);
+
+			nameSpan.replaceWith(wrapper);
 			input.focus();
 			input.select();
+
+			function finish(restoreLabel) {
+				if (restoreLabel) {
+					wrapper.replaceWith(nameSpan);
+				} else {
+					// Let the next portal:gadgetRenamed event + renderList refresh the label
+					wrapper.replaceWith(nameSpan);
+				}
+			}
 
 			function commit() {
 				const newName = (input.value || '').trim();
 				if (!newName || newName === currentName) {
-					cancel();
+					finish(true);
 					return;
 				}
-				try { portal.renameInstance(classId, instanceId, newName); }
-				catch (err) { console.error('[Settings] renameInstance failed', err); }
+				if (typeof portal.renameInstance !== 'function') {
+					console.warn('[Settings] renameInstance not available on Portal');
+					finish(true);
+					return;
+				}
+				try {
+					portal.renameInstance(classId, instanceId, newName);
+				} catch (err) {
+					console.error('[Settings] renameInstance failed', err);
+					finish(true);
+					return;
+				}
+				finish(false);
 			}
 
 			function cancel() {
-				input.replaceWith(nameSpan);
+				finish(true);
 			}
 
 			input.addEventListener('keydown', (ev) => {
@@ -1009,11 +1065,18 @@ chkFold.addEventListener('change', () => {
 				}
 			});
 
+			btnOk.addEventListener('click', commit);
+			btnCancel.addEventListener('click', cancel);
+
 			input.addEventListener('blur', () => {
-				cancel();
+				// Avoid immediate cancel when clicking ✓ / ×
+				setTimeout(() => {
+					if (!row.contains(document.activeElement)) {
+						cancel();
+					}
+				}, 80);
 			});
 		}
-
 
 		// Keep the legacy MI-manager wiring alive for runtime refresh (even though UI is hidden)
 		function buildMultiInstanceManager(rootEl) {
