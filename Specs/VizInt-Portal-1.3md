@@ -1,0 +1,580 @@
+# 📘 VizInt Portal Specification — v1.3R (Restored & Authoritative)
+
+*(Merged Update from v1.2 → v1.3, with all missing Portal-owned contracts reinstated. Non‑nuke, future‑ready, and chrome‑complete.)*
+
+---
+
+# 0. Purpose
+
+This document defines the **Portal Runtime Contract** for VizInt v1.3R.
+
+It merges:
+
+* v1.3 baseline Portal rules
+* all Portal‑owned content missing from v1.3 but present in v1.2
+* restored authoritative chrome specification
+* restored multi‑instance Settings UI contract
+* restored descriptor lifecycle rules
+* restored rename/delete/ordering/visibility rules
+
+Other subsystem specs (System, Atlas, Chronus, Gadgets) remain authoritative for their domains.
+
+Where contradictions existed, **v1.3R supersedes**.
+
+---
+
+# 1. Portal Responsibilities
+
+Portal MUST:
+
+* Load and validate manifests
+
+* Generate descriptors for all gadget instances
+
+* Maintain runtime table `instancesByClass`
+
+* Inject `ctx.libs` (Core, Chronus, Atlas, Nexus)
+
+* Maintain canonical storage keys:
+
+  ```
+    vz:gadgets:{storageKey}:{instanceId}
+  ```
+
+* Maintain persistent instance catalog under `settings.instances`
+
+* Own chrome creation and all chrome UI behavior
+
+* Persist ordering, layout, visibility, and metadata
+
+* Support `file://` execution with graceful fallbacks
+
+* Enforce storage doctrine (namespacing, migration, no cross‑writes)
+
+* Guarantee deterministic gadget loading order
+
+* Enforce rename + namespace movement semantics
+
+* Prevent gadgets from escaping their viewport
+
+Portal MUST NOT:
+
+* Allow gadgets to render or relayout their own chrome
+* Allow gadgets to write outside their namespace
+* Force-enable the Settings gadget
+* Expose direct `localStorage` to gadgets
+* Allow settings writes during `mount()`
+
+---
+
+# 2. Gadget Manifest Processing
+
+## 2.1 Required fields
+
+```
+_api
+_class
+_type
+_id
+_ver
+label
+```
+
+## 2.2 Recommended fields
+
+```
+verBlurb
+bidi
+description
+publisher
+contact_email
+contact_url
+iconEmoji / iconPng
+iconBg / iconBorder
+capabilities
+defaults
+propsSchema
+supportsSettings
+```
+
+## 2.3 Legacy fallback
+
+If missing:
+
+* `_class = filename`
+* `_id = filename`
+* `_type = "single"`
+
+Minimal chrome shown; `ctx.libs` still injected.
+
+---
+
+# 3. Descriptor Model (v1.3R)
+
+Portal MUST construct and maintain **one descriptor per instance** containing:
+
+* `id`
+* `classId` (normalized unless system)
+* `instanceId`
+* `displayName`
+* `manifest`
+* `gadgetType`
+* `isSystem`
+* `isHeader`
+* `supportsSettings`
+* `showSettingsGear`
+* `badges`
+* `bidi`
+* `storageKey`
+* `instanceIndex`
+* `layoutState` (restored)
+* `visibility` (restored)
+
+## 3.1 Descriptor lifecycle (restored)
+
+Portal MUST:
+
+* Treat descriptors as the **single source of truth** for chrome rendering.
+* Rebuild descriptors after:
+
+  * instance creation
+  * instance deletion
+  * instance rename
+  * instance reorder
+  * class reorder
+  * layout change
+  * visibility change
+  * storage migration
+
+Chrome MUST render **strictly** from descriptor content.
+
+---
+
+# 4. Context Injection (`ctx`)
+
+Gadgets receive:
+
+```
+ctx = {
+  name,
+  host,
+  env: {
+    geometry,
+    layout,        // collapsed | spanWide | fullscreen
+    isDark,
+    bidi,
+    mode           // normal | modal
+  },
+
+  libs: { Core, Chronus, Atlas, Nexus },
+
+  settings: {
+    get(key, def),
+    set(patch),
+    reset(),
+    getAll()
+  },
+
+  getSettings,
+  setSettings,
+  resetSettings,
+
+  bus,
+  shared           // deprecated
+}
+```
+
+## 4.1 ctx.shared
+
+* MUST warn on first access
+* MUST forward to `ctx.libs`
+* MUST remain until v1.4
+
+## 4.2 Enforcement
+
+Portal MUST prevent calls to `setSettings()` during `mount()`.
+
+---
+
+# 5. Storage Model (v1.3R)
+
+Canonical location:
+
+```
+    vz:gadgets:{storageKey}:{instanceId}
+```
+
+Where:
+
+* `storageKey = normalizeSlug(_class)`
+* `instanceId = normalizeSlug(_id)`
+
+System gadgets use raw classId externally but normalized storageKey internally.
+
+## 5.1 Migration rules
+
+Portal MUST:
+
+* Read legacy keys: `Vz:<Class>:<Instance>`
+* Merge legacy + canonical
+* Remove legacy key after successful migration
+
+## 5.2 Rename Namespace Movement (restored)
+
+When an instance is renamed:
+
+* Portal MUST move its entire settings namespace to the new slug
+* MUST update all descriptors
+* MUST update instance catalog
+* MUST refresh chrome
+
+## 5.3 Write requirements
+
+Portal MUST:
+
+* JSON-serialize
+* Debounce ≥150ms
+* Allow deletion of per-instance and per-class buckets
+* Guarantee file://‑safe behavior
+
+---
+
+# 6. Capability Semantics
+
+* `chronus` → ctx.libs.Chronus
+* `atlas` → ctx.libs.Atlas
+* `network` → remote fetch allowed
+* `served` → expects HTTP(S)
+
+## 6.1 File-mode rule
+
+If gadget declares `served` and running under `file://`:
+
+* Portal MUST prepend ⚠ badge
+* Gadget MUST still mount
+
+Badge order:
+
+1. ⚠ file-mismatch
+2. chronus
+3. atlas
+4. network
+5. served
+
+---
+
+# 7. Chrome Specification (Authoritative, v1.3R)
+
+**This is the fully restored chrome contract.**
+
+Chrome controls include:
+
+* Icon
+* Label
+* Title chips
+* Capability badges
+* Collapse / wide / fullscreen controls
+* Folding hub (restored)
+* Settings gear
+* Instance rename/edit controls
+* Instance delete control
+* Visibility checkbox
+* Ordering arrows (↑/↓)
+
+Chrome MUST use:
+
+```
+chromeCtx = {
+  initialLayout,
+  onLayoutChanged(),
+  onToggleCollapse(),
+  onToggleWide(),
+  onToggleFullscreen(),
+  onClose(),
+  onInfoRequest(),
+  onSettingsRequested(),
+  onInstanceRenamed(),
+  onInstanceDeleted(),
+  onVisibilityChanged(),
+  onInstanceModeToggle(),
+  onReorderInstance(),
+  onReorderClass()
+}
+```
+
+## 7.1 Chrome Behavior Rules (restored)
+
+Portal MUST:
+
+* Render chrome strictly from descriptor
+* Enforce layout direction using `bidi`
+* Prevent gadgets from relayout or DOM override
+* Maintain badge alignment grid across all gadgets
+* Keep label → textbox rename flow with:
+
+  * Enter / ✓ commits
+  * Esc / ✖ cancels
+  * Empty names rejected
+* Center/align icons and badges consistently in RTL and LTR
+
+Folding Hub (💠):
+
+* MUST toggle gadget compactness
+* MUST be visually distinct from collapse
+* MUST remain Portal-owned
+
+---
+
+# 8. Layout & Geometry
+
+Portal MUST:
+
+* Persist per-instance layout:
+
+  ```
+    settings.layout[classId][instanceId] = { collapsed, spanWide, fullscreen }
+  ```
+
+* Maintain legacy fallback:
+
+  ```
+    settings.gadgetState[gadgetId] = { collapsed, wide, fullscreen }
+  ```
+
+* Guarantee safe merge during migration
+
+Portal MUST NOT allow gadgets to escape their viewport.
+
+---
+
+# 9. Multi-Instance Runtime Model — Stage 2A/B/C (v1.3R)
+
+## 9.1 Stage‑2A: Runtime Table
+
+Portal maintains:
+
+```
+    instancesByClass: Map<classId, Array<instanceRecord>>
+```
+
+Where each record:
+
+```
+    { instanceId, displayName, descriptor }
+```
+
+Portal MUST emit `portal:gadgetInstancesChanged` after any mutation.
+
+## 9.2 Stage‑2B: Ordering & Layout
+
+Portal MUST support:
+
+* Reordering instances within class block
+* Reordering class blocks
+* Updating descriptor.instanceIndex
+* Keeping siblings adjacent only on first render
+* Independent movement afterwards
+
+## 9.3 Stage‑2C: Persistent Instance Catalog
+
+```
+    settings.instances = {
+      [classId]: {
+        order: [instanceId...],
+        records: {
+          [instanceId]: {
+            instanceId,
+            displayName,
+            manifestId
+          }
+        }
+      }
+    }
+```
+
+Portal MUST provide:
+
+* addInstance(classId)
+* renameInstance
+* removeInstance
+* reorderInstance
+* getInstanceConfig
+
+---
+
+# 10. Settings Modal Host (v1.3R)
+
+Portal MUST:
+
+* openSettingsModal({ gadgetId })
+* closeSettingsModal()
+
+chrome.js MUST expose:
+
+* createSettingsModalShell()
+
+Modal rules:
+
+* Mount gadget with `ctx.env.mode = "modal"`
+* MUST NOT affect dock layout
+* MUST unmount gadget on close
+
+---
+
+# 11. Settings UI Contract — Fully Restored (v1.3R)
+
+## 11.1 Class Row (Parent)
+
+Layout:
+
+[ + ] [icon] {Class Name} [Badges] [↑] [↓]
+
+Rules:
+
+* No checkbox
+* ➕ creates new instance
+* Class-level badges shown
+* Arrows reorder entire class block
+* Instances appear beneath this row
+
+## 11.2 Instance Rows (Children)
+
+[ – ] [☑] [icon] {Instance Name (editable)} [Badges] [↑] [↓]
+
+Rules:
+
+* – shows delete confirmation modal
+* ☑ toggles visibility
+* Icon matches class icon
+* Editable name with commit/cancel rules
+* Empty names forbidden
+* Arrows reorder instance within its class block
+
+## 11.3 Instantiation
+
+* Portal allocates `instanceId`
+
+* Default name:
+
+  ```
+    {Class Name} #nn
+  ```
+
+* Create namespace:
+
+  ```
+    vz:gadgets/{classId}/{instanceId}/*
+  ```
+
+* Generate descriptor + rerender chrome
+
+## 11.4 Deletion
+
+Deleting instance MUST:
+
+* show confirmation modal
+* delete namespace
+* update catalog
+* rebuild descriptors
+* refresh chrome
+
+## 11.5 Renaming
+
+* Label → textbox
+* ✓/Enter commits, ✖/Esc cancels
+* Namespace moved
+* descriptors rebuilt
+* catalog updated
+
+## 11.6 Reordering
+
+* Class arrows move entire class block
+* Instance arrows move only within parent block
+* Persisted in settings
+
+## 11.7 Badge Alignment Grid
+
+All badges MUST align across:
+
+* class rows
+* instance rows
+* single-instance gadgets
+
+## 11.8 ASCII Schematic (Normative — MUST Persist)
+
+The canonical visual layout of the Settings UI MUST match the following schematic (spacing and columns are illustrative but structurally normative):
+
+```
+│      [☑] [icon] Class Name                        [Badges]   [↕] [⚙️]
+│      [☐] [icon] Class Name                        [Badges]   [↕] [⚙️]
+│      [☑] [icon] Class Name                        [Badges]   [↕] [⚙️]
+│      [+] [icon] Class Name                        [Badges]   [↕]        // Multi-instance gadget class row; [+] adds an instance
+│      [–] [☑] [icon] Instance Name   [🖊️][✖️]      [Badges]   [↕] [⚙️]
+│      [–] [☑] [icon] Instance Name   [🖊️][✖️]      [Badges]   [↕] [⚙️]
+│      [–] [☑] [icon] Instance Name   [🖊️][✖️]      [Badges]   [↕] [⚙️]
+│      [☑] [icon] Class Name                        [Badges]   [↕] [⚙️]
+│      [☑] [icon] Class Name                        [Badges]   [↕] [⚙️]
+│      [–] [☑] [icon] Instance Name   [🖊️][✖️]      [Badges]   [↕] [⚙️]   // Instance of multi-instance gadget moved away from its class block
+│      [☑] [icon] Class Name                        [Badges]   [↕] [⚙️]
+```
+
+This schematic is:
+
+* **Normative** for: column roles, presence of controls, and parent/child relationships.
+* **Illustrative** for: exact spacing, font choices, and minor visual styling.
+
+Badges, checkboxes, arrows, and gears MUST occupy consistent columns across:
+
+* class rows
+* instance rows
+* single-instance gadgets
+
+---
+
+# 12. Event Bus (Nexus)
+
+Portal MUST:
+
+* Provide ctx.libs.Nexus.bus
+* Guarantee synchronous delivery
+* Auto-inject sender + timestamp metadata
+
+---
+
+# 13. File Policy
+
+Portal MUST:
+
+* Allow gadgets under file://
+* Add ⚠ badge for served mismatch
+* Provide Atlas fallbacks
+
+---
+
+# 14. Legacy Gadget Handling
+
+Portal MUST:
+
+* Support _type missing → treat as single
+* Maintain ctx.shared through v1.3
+* Provide minimal chrome for legacy
+
+---
+
+# 15. Compliance
+
+Portal MUST:
+
+* Follow System Spec
+* Ensure normalized slugs
+* Maintain non-destructive compatibility
+* Guarantee deterministic chrome behavior
+
+Portal SHOULD:
+
+* Warn on deprecated manifest fields
+* Warn on legacy ctx.shared use
+
+---
+
+# END OF SPEC — VizInt Portal v1.3R
