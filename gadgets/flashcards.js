@@ -1,6 +1,7 @@
 // gadgets/flashcards.js
-// $VER: FlashCards v0.4.0 — Multi-instance manifest + v1.2.2 registration
+// $VER: FlashCards v0.4.2 — Multi-instance manifest + v1.2.2 registration
 // $HISTORY:
+//   v0.4.2 — Fixed multi-instance re-entrancy - scoped variables, and delimiter heavy CSVs.
 //   v0.4.0 — Converted to multi-instance (_type:"multi"), _id:"default", registration via manifest._class (v1.2.2).
 //   v0.3.2 — 3D-style toggle buttons; keep hidden config hook for chrome
 //   v0.3.2 — 3D-style toggle buttons; keep hidden config hook for chrome
@@ -73,26 +74,51 @@
 
 	// Heuristic delimiter detection: comma, semicolon, tab, or pipe
 	function detectDelimiter(sampleText) {
-		const firstLines = sampleText.split(/\r?\n/).slice(0, 5);
-		const count = (re) =>
-			firstLines
-				.map((l) => (l.match(re) || []).length)
-				.reduce((a, b) => a + b, 0);
+		const firstLines = sampleText
+			.split(/\r?\n/)
+			.map((l) => l.trim())
+			.filter((l) => l.length)
+			.slice(0, 5);
 
-		const C = count(/,/g);
-		const S = count(/;/g);
-		const T = count(/\t/g);
-		const P = count(/\|/g); // pipe
+		if (!firstLines.length) return ",";
+
+		// Count delimiters OUTSIDE double quotes
+		function countChar(ch) {
+			let total = 0;
+			for (const line of firstLines) {
+				let inQuote = false;
+				for (let i = 0; i < line.length; i++) {
+					const c = line[i];
+
+					if (c === '"') {
+						// Handle doubled quotes ("") as escaped quotes
+						if (inQuote && line[i + 1] === '"') {
+							i++; // skip the second quote
+							continue;
+						}
+						inQuote = !inQuote;
+					} else if (!inQuote && c === ch) {
+						total++;
+					}
+				}
+			}
+			return total;
+		}
+
+		const C = countChar(",");
+		const S = countChar(";");
+		const T = countChar("\t");
+		const P = countChar("|");
 
 		const best = Math.max(C, S, T, P);
 
-		// If we saw no delimiters at all, just fall back to comma
+		// Prefer ; / \t / | if they clearly dominate, else fall back to comma
 		if (best === 0) return ",";
 
-		// Tie-breaking: prefer pipe, then tab, then semicolon, then comma
-		if (best === P) return "|";
-		if (best === T) return "\t";
 		if (best === S) return ";";
+		if (best === T) return "\t";
+		if (best === P) return "|";
+
 		return ",";
 	}
 
@@ -234,15 +260,32 @@
 				{};
 			console.debug("[Flashcards] mount() settings snapshot", s);
 
-			const my = s.flashcards || {
-				rawCSV: "",
-				sourceUrl: "",
-				parsed: [],
-				mode: "drand", // "sequential" | "drand"
-				auto: true,
-				intervalMs: 5000,
-				flipStyle: "reveal", // "reveal" | "inline"
-				ui: { showConfig: false }
+			// Clone persisted state so each instance gets its own runtime object
+			const persisted = s.flashcards || {};
+
+			const my = {
+				rawCSV:
+					typeof persisted.rawCSV === "string" ? persisted.rawCSV : "",
+				sourceUrl:
+					typeof persisted.sourceUrl === "string"
+						? persisted.sourceUrl
+						: "",
+				parsed: Array.isArray(persisted.parsed)
+					? persisted.parsed.slice()
+					: [],
+				mode:
+					persisted.mode === "sequential" || persisted.mode === "drand"
+						? persisted.mode
+						: "drand",
+				auto:
+					typeof persisted.auto === "boolean" ? persisted.auto : true,
+				intervalMs:
+					Number.isFinite(persisted.intervalMs) && persisted.intervalMs > 0
+						? persisted.intervalMs
+						: 5000,
+				flipStyle:
+					persisted.flipStyle === "inline" ? "inline" : "reveal",
+				ui: Object.assign({ showConfig: false }, persisted.ui || {})
 			};
 
 			console.debug("[Flashcards] mount() initial my", {
