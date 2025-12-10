@@ -1,6 +1,8 @@
 // gadgets/flashcards.js
-// $VER: FlashCards v0.3.2 — 3D-style toggle buttons; keep hidden config hook for chrome
+// $VER: FlashCards v0.4.0 — Multi-instance manifest + v1.2.2 registration
 // $HISTORY:
+//   v0.4.0 — Converted to multi-instance (_type:"multi"), _id:"default", registration via manifest._class (v1.2.2).
+//   v0.3.2 — 3D-style toggle buttons; keep hidden config hook for chrome
 //   v0.3.2 — 3D-style toggle buttons; keep hidden config hook for chrome
 //   v0.3.1 — toolbar button on/off styling; smaller buttons; settings click-to-toggle
 //   v0.3.0 — toolbar 🆎 answer-display toggle; hide in-gadget settings button
@@ -10,10 +12,10 @@
 	// ===== Manifest (VizInt v1.0) =====
 	const manifest = {
 		_api: "1.0",
-		_class: "FlashCards",
-		_type: "singleton",
-		_id: "Local",
-		_ver: "v0.3.2",
+		_class: "flashcards",
+		_type: "multi",
+		_id: "default",
+		_ver: "v0.4.0",
 		verblurb:
 			"3D-style toggle buttons; keep hidden config hook for chrome",
 		label: "Flash Cards",
@@ -431,7 +433,9 @@
 							</div>
 							<span class="muted fineprint" id="fc-load-note"></span>
 						</div>
-						<div class="muted fineprint">Examples: https://kambalino.github.io/VizInt/res/flashcards_it_100.csv</div>
+						<div class="muted fineprint">Examples:</div>
+						<div class="muted fineprint">https://kambalino.github.io/VizInt/res/flashcards_it_100.csv</div>
+						<div class="muted fineprint">https://kambalino.github.io/VizInt/res/flashcards_ar_q_350.csv</div>
 						<div class="field" style="grid-template-columns:1fr;">
 							<label for="fc-csv">Paste CSV</label>
 							<textarea id="fc-csv" name="fc-csv" rows="8" placeholder='"Side A","Side B","Notes"'></textarea>
@@ -1239,7 +1243,7 @@
 
 	// Expose
 	window.GADGETS = window.GADGETS || {};
-	window.GADGETS.flashcards = {
+	window.GADGETS[manifest._class] = {	
 		manifest,
 		info,
 		mount,
