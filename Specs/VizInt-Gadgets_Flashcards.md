@@ -47,14 +47,20 @@ The gadget MUST export an object with:
 ```js
 window.GADGETS.flashcards = {
     manifest: {
+
 		_api: "1.0",
-		_class: "FlashCards",
-		_type: "singleton",
-		_id: "Local",
-		_ver: "v0.2.9",
-		verblurb: "...",
+		_class: "flashcards",
+		_type: "multi",
+		_id: "default",
+		_ver: "v0.4.0",
+		verblurb:
+			"Adding pin/bookmarking & 👎👍 to support learning",
 		label: "Flash Cards",
 		iconEmoji: "🎓",
+		capabilities: ["network"], // URL fetch (paste works offline)
+		description:
+			"CSV-powered flash cards with sequential or diminishing-random rotation.",
+		supportsSettings: true // 👈 THIS is the important bit
 		capabilities: ["network"],
 		description: "CSV-powered flash cards with sequential or diminishing-random rotation."
     },
@@ -226,5 +232,118 @@ Flashcards is:
 * Add global keyboard shortcuts.
 
 ---
+
+<!--
+INCREMENTAL EDIT v0.?.? — Flashcards Spec Update
+Changes below are additive and diff-friendly.
+-->
+
+## Toolbar Model (Updated)
+
+### Visibility & Interaction
+
+* **Desktop**: Toolbars appear on hover over the gadget chrome.
+* **Touch UI**: Toolbars appear on tap anywhere on gadget chrome and auto-hide after *N* seconds.
+* Implementation **reuses the hidden-toolbar model** employed by the *Embed-Web* gadget (details to be shared later).
+
+### Top Toolbar (Primary Actions)
+
+**Left-aligned:**
+
+* 👍 / 👎 (future spaced repetition signals)
+* ♥ / ❤️ — View mode toggle:
+
+  * ♥ Regular view (show all cards)
+  * ❤️ Favorites-only view
+* 🔖 Bookmark (mark/unmark card as favorite)
+* 📌 Pin (pin card permanently above rotating deck)
+* 📋 Share (clipboard-first payload)
+
+**Right-aligned:**
+
+* 🧹 Sweep (deck reset; relocated from main UI into toolbar only)
+
+### Bottom Toolbar (Playback & Display)
+
+**Left-aligned:**
+
+* ⏮️ / ⏭️ Previous / Next
+* 🔁 Mode toggle (Sequential / Diminishing Random)
+* ▶️ Play / Pause (Auto)
+* 🔄 Flip / Reveal
+
+**Right-aligned:**
+
+* 🆎 Display mode toggle:
+
+  * Side A only
+  * Side B only
+  * A | B together
+
+---
+
+## Card Identity & Persistence
+
+### Card Hash (Internal Identity)
+
+* Card identity hash is computed **only from Side A + Side B**.
+* Notes / hint fields are **explicitly excluded**.
+* No CSV-level hashing is performed.
+
+### Share Identity
+
+Shared payload MUST include:
+
+* Card hash (A + B)
+* Source URL (if present)
+* Gadget instance label
+* Timestamp
+
+---
+
+## Favorites & Pins
+
+* 🔖 Bookmark toggles *favorite* status per card (per instance).
+* ♥/❤️ Favorites view filters deck to favorites only.
+* 📌 Pin keeps the card permanently rendered **above** the rotating card.
+* All pin/favorite state is **per gadget instance**, persisted via `ctx.settings`.
+
+---
+
+## Layout & Typography
+
+* **Grow-to-fill** layout is the default for:
+
+  * Side A
+  * Side B
+  * A | B combined view
+* Text dynamically scales to available viewport space.
+* Hint / notes remain in fineprint style for now.
+
+### Settings (Per Instance)
+
+* Font size controls (min/max bounds)
+* Toggle grow-to-fill on/off
+* All settings are **per instance**, no global state.
+
+---
+
+## Future-Looking: Spaced Repetition (Deferred)
+
+* 👍 / 👎 signals reserved for spaced repetition logic.
+* Behavior to be defined in a dedicated *Spaced Repetition Spec*.
+* Chronus integration explicitly **on hold**.
+
+---
+
+## Spec Governance Notes
+
+* This document is part of the **VizInt Portal** ecosystem.
+* Flashcards is a **VizInt Gadget**, compliant with Gadget Spec v1.2.x.
+* All changes follow:
+
+  * Incremental edits
+  * Non-nuking doctrine
+  * Human-diffable updates
 
 **END OF SPEC**
