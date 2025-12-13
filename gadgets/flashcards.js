@@ -1,13 +1,14 @@
 // gadgets/flashcards.js
-// $VER: FlashCards v0.4.2 — Multi-instance manifest + v1.2.2 registration
+// $VER: FlashCards v0.4.3
 // $HISTORY:
-//   v0.4.2 — Fixed multi-instance re-entrancy - scoped variables, and delimiter heavy CSVs.
-//   v0.4.0 — Converted to multi-instance (_type:"multi"), _id:"default", registration via manifest._class (v1.2.2).
-//   v0.3.2 — 3D-style toggle buttons; keep hidden config hook for chrome
-//   v0.3.2 — 3D-style toggle buttons; keep hidden config hook for chrome
-//   v0.3.1 — toolbar button on/off styling; smaller buttons; settings click-to-toggle
-//   v0.3.0 — toolbar 🆎 answer-display toggle; hide in-gadget settings button
-//   v0.2.9 — auto-reparse on mount; parseCSV instrumentation; silent toggleConfig after save
+//	v0.4.3 - EmbedWeb-style hidden hover toolbars (top/bottom); sweep moved to top; move 🗑️ into settings
+//	v0.4.2 - Fixed multi-instance re-entrancy - scoped variables, and delimiter heavy CSVs.
+//	v0.4.0 - Converted to multi-instance (_type:"multi"), _id:"default", registration via manifest._class (v1.2.2).
+//	v0.3.2 - 3D-style toggle buttons; keep hidden config hook for chrome
+//	v0.3.2 - 3D-style toggle buttons; keep hidden config hook for chrome
+//	v0.3.1 - toolbar button on/off styling; smaller buttons; settings click-to-toggle
+//	v0.3.0 - toolbar 🆎 answer-display toggle; hide in-gadget settings button
+//	v0.2.9 - auto-reparse on mount; parseCSV instrumentation; silent toggleConfig after save
 
 (function () {
 	// ===== Manifest (VizInt v1.0) =====
@@ -112,7 +113,7 @@
 
 		const best = Math.max(C, S, T, P);
 
-		// Prefer ; / \t / | if they clearly dominate, else fall back to comma
+		// If we saw no delimiters at all, just fall back to comma
 		if (best === 0) return ",";
 
 		if (best === S) return ";";
@@ -411,10 +412,30 @@
 
 				return nextPersist;
 			}
-
+			/*
+								<button type="button" class="gbtn" data-fc="down" title="Show more often (👎)">👎</button>
+								<button type="button" class="gbtn" data-fc="up" title="Show less often (👍)">👍</button> |
+								<button type="button" class="gbtn" data-fc="viewall" title="All cards">♥</button>
+								<button type="button" class="gbtn" data-fc="viewfav" title="Favorites only">❤️</button> |
+								<button type="button" class="gbtn" data-fc="bookmark" title="Bookmark 🔖">🔖</button>
+								<button type="button" class="gbtn" data-fc="pin" title="Pin 📌">📌</button> |
+								<button type="button" class="gbtn" data-fc="copy" title="Copy 📋">📋</button>
+								<button type="button" class="gbtn" data-fc="share" title="Share">🔗</button>
+			*/
 			// DOM
 			host.innerHTML = `
 				<div class="fc-wrap">
+
+					<!-- TOP TOOLBAR (above card) -->
+					<div class="fc-handle fc-handle-top" data-fcbar="top">
+						<div class="fc-tools fc-tools-top">
+							<button type="button" class="gbtn" data-fc="copy" title="Copy 📋">📋</button>
+							<button type="button" class="gbtn" data-fc="share" title="Share">🔗</button>
+							<span class="fc-flex"></span>
+							<button type="button" class="gbtn" data-fc="reset" title="Reset Deck">🧹</button>
+						</div>
+					</div>
+
 					<div class="fc-card">
 						<div class="fc-front" aria-live="polite"></div>
 						<div class="fc-back" aria-live="polite"></div>
@@ -423,40 +444,19 @@
 
 					<div class="fc-status muted fineprint"></div>
 					<hr class="fc-hr" />
-					<div class="fc-controls">
-						<button type="button" class="gbtn" data-fc="prev"  title="Previous">⏮️</button>
-						<button type="button" class="gbtn" data-fc="next"  title="Next">⏭️</button> |
-						<button
-							type="button"
-							class="gbtn"
-							data-fc="mode"
-							title="Toggle Mode (Sequential / Diminishing Random)"
-							aria-pressed="false"
-						>🔁</button>
-						<button
-							type="button"
-							class="gbtn"
-							data-fc="auto"
-							title="Auto On/Off"
-							aria-pressed="false"
-						>▶️</button> 
-						<button type="button" class="gbtn" data-fc="reset" title="Reset Deck">🧹</button> |
-						<button type="button" class="gbtn" data-fc="flip"  title="Flip / Reveal">🔄</button>
-						<span class="fc-flex"></span>
-						<button
-							type="button"
-							class="gbtn"
-							data-fc="flipmode"
-							title="Toggle Answer Display (Flip / Inline)"
-							aria-pressed="false"
-						>🆎</button>
-						<button
-							type="button"
-							class="gbtn fc-config-hidden"
-							data-fc="config"
-							title="Settings"
-						>⚙️</button>
-						<button type="button" class="gbtn" data-fc="purge"  title="Erase Flash Cards data">🗑️</button>
+
+					<!-- BOTTOM TOOLBAR (below card) -->
+					<div class="fc-handle fc-handle-bot" data-fcbar="bot">
+						<div class="fc-tools fc-tools-bot">
+							<button type="button" class="gbtn" data-fc="prev"  title="Previous">⏮️</button>
+							<button type="button" class="gbtn" data-fc="next"  title="Next">⏭️</button> |
+							<button type="button" class="gbtn" data-fc="mode" title="Toggle Mode (Sequential / Diminishing Random)" aria-pressed="false">🔁</button>
+							<button type="button" class="gbtn" data-fc="auto" title="Auto On/Off" aria-pressed="false">▶️</button> |
+							<button type="button" class="gbtn" data-fc="flip" title="Flip / Reveal">🔄</button>
+							<span class="fc-flex"></span>
+							<button type="button" class="gbtn" data-fc="flipmode" title="Toggle Answer Display (Flip / Inline)" aria-pressed="false">🆎</button>
+							<button type="button" class="gbtn fc-config-hidden" data-fc="config" title="Settings">⚙️</button>
+						</div>
 					</div>
 				</div>
 
@@ -464,6 +464,7 @@
 					<div class="fc-cfg-head">
 						<div class="fc-cfg-title">🎓 Flash Cards — Settings</div>
 						<div class="fc-cfg-actions">
+						<button type="button" class="gbtn" data-fc="purge" title="Erase Flash Cards data">🗑️</button>
 							<button type="button" class="gbtn" data-cfg="close" title="Close">✕</button>
 						</div>
 					</div>
@@ -526,8 +527,93 @@
 			const elBack = host.querySelector(".fc-back");
 			const elInline = host.querySelector(".fc-inline");
 			const elStatus = host.querySelector(".fc-status");
-			const elControls = host.querySelector(".fc-controls");
+//			const elControls = host.querySelector(".fc-controls");
+			const elControls = host; // event delegation stays on host
+			const elTopHandle = host.querySelector(".fc-handle-top");
+			const elBotHandle = host.querySelector(".fc-handle-bot");
 			const elConfig = host.querySelector(".fc-config");
+
+			// EmbedWeb-style hidden handle bars: on desktop (hover), toolbars expand on hover.
+			// On touch UIs (no hover), a tap reveals the bar for a short period.
+			const __fcHoverNone =
+				window.matchMedia &&
+				typeof window.matchMedia === "function" &&
+				window.matchMedia("(hover: none)").matches;
+
+			function wireHandle(el, { autoHideMs = 3500 } = {}) {
+				if (!el) return () => {};
+
+				let persist = false;
+				let hideT = null;
+
+				function setExpanded(on) {
+					el.classList.toggle("expanded", !!on);
+				}
+
+				function clearHide() {
+					if (hideT) {
+						clearTimeout(hideT);
+						hideT = null;
+					}
+				}
+
+				function scheduleHide(ms = autoHideMs) {
+					clearHide();
+					hideT = setTimeout(() => {
+						persist = false;
+						setExpanded(false);
+					}, ms);
+				}
+
+				function openTransient() {
+					persist = false;
+					setExpanded(true);
+					scheduleHide();
+				}
+
+				function togglePersist() {
+					persist = !persist;
+					setExpanded(persist);
+				}
+
+				function onEnter() {
+					if (__fcHoverNone) return;
+					clearHide();
+					setExpanded(true);
+				}
+
+				function onLeave() {
+					if (__fcHoverNone) return;
+					if (persist) return;
+					scheduleHide(900);
+				}
+
+				function onClick(e) {
+					// Clicking actual toolbar buttons should not toggle the handle itself.
+					if (e.target && e.target.closest && e.target.closest("button")) return;
+
+					if (__fcHoverNone) {
+						openTransient();
+					} else {
+						togglePersist();
+					}
+				}
+
+				el.addEventListener("mouseenter", onEnter);
+				el.addEventListener("mouseleave", onLeave);
+				el.addEventListener("click", onClick);
+
+				return () => {
+					clearHide();
+					el.removeEventListener("mouseenter", onEnter);
+					el.removeEventListener("mouseleave", onLeave);
+					el.removeEventListener("click", onClick);
+				};
+			}
+
+			const __unwireTop = wireHandle(elTopHandle);
+			const __unwireBot = wireHandle(elBotHandle, { autoHideMs: 2500 });
+
 
 			const urlIn = host.querySelector("#fc-url");
 			const csvIn = host.querySelector("#fc-csv");
@@ -814,6 +900,37 @@
 				return idx;
 			}
 
+			function getActiveTextForExport() {
+				const n = my.parsed.length;
+				if (!n) return "";
+
+				const rec = my.parsed[clamp(my.index || 0, 0, n - 1)] || {};
+				const A = (rec.a || "").replace(/<br\s*\/?>/gi, "\n").replace(/<\/?[^>]+>/g, "").trim();
+				const B = (rec.b || "").replace(/<br\s*\/?>/gi, "\n").replace(/<\/?[^>]+>/g, "").trim();
+				const N = (rec.notes || "").replace(/<br\s*\/?>/gi, "\n").replace(/<\/?[^>]+>/g, "").trim();
+
+				// Honor current display mode
+				if (my.flipStyle === "inline") {
+					return N ? `${A}\n(${B})\n\n${N}` : `${A}\n(${B})`;
+				}
+				// reveal mode
+				if (showingAnswer) {
+					return N ? `${B}\n\n${N}` : `${B}`;
+				}
+				return `${A}`;
+			}
+
+			async function copyToClipboard(text) {
+				try {
+					if (navigator.clipboard && navigator.clipboard.writeText) {
+						await navigator.clipboard.writeText(text);
+						return true;
+					}
+				} catch (e) {}
+				return false;
+			}
+
+
 			function renderCard(idx) {
 				const n = my.parsed.length;
 				if (!n) {
@@ -1002,7 +1119,7 @@
 				}, ivl);
 			}
 
-			elControls.addEventListener("click", (e) => {
+			host.addEventListener("click", (e) => {
 				const b = e.target.closest("button[data-fc]");
 				if (!b) return;
 
@@ -1057,6 +1174,27 @@
 					showingAnswer = false;
 					render();
 					if (my.auto) restartTimer();
+				} else if (act === "up" || act === "down") {
+					// ///! Placeholder for Spaced Repetition vNext (👍/👎). For now, no-op.
+					console.debug("[Flashcards] feedback", { act, idx: my.index });
+				} else if (act === "viewall" || act === "viewfav") {
+					// ///! Placeholder for Favorites view toggle (♥ / ❤️).
+					console.debug("[Flashcards] view mode toggle", { act });
+				} else if (act === "bookmark" || act === "pin") {
+					// ///! Placeholder for bookmark/pin (🔖 / 📌).
+					console.debug("[Flashcards] mark", { act, idx: my.index });
+				} else if (act === "copy") { 
+					const txt = getActiveTextForExport();
+					copyToClipboard(txt);
+				} else if (act === "share") { // 📋
+					const txt = getActiveTextForExport();
+					const src = (my.sourceUrl || "").trim();
+					const stamp = new Date().toISOString();
+					const payload =
+						(src ? `Source: ${src}\n` : "") +
+						`When: ${stamp}\n\n` +
+						txt;
+					copyToClipboard(payload);
 				} else if (act === "reset") {
 					console.debug("[Flashcards] reset button");
 					stopTimer();
@@ -1237,6 +1375,8 @@
 			// Return unmount cleanup
 			return () => {
 				console.debug("[Flashcards] unmount cleanup");
+				try { __unwireTop && __unwireTop(); } catch { /* noop */ }
+				try { __unwireBot && __unwireBot(); } catch { /* noop */ }
 				stopTimer();
 				if (ro) {
 					try {
@@ -1345,21 +1485,66 @@
 		.fc-hr { margin: 4px 0; opacity: 0.25; }
 		.fc-controls {
 			display:flex;
-			align-items:center;
-			gap:4px;
-			flex-wrap:wrap;
+			flex-direction:column;
+			gap:0;
 		}
+
+		/* EmbedWeb-style hidden handle bars (hover to expand) */
+		.fc-handle {
+			height:4px;
+			background: rgba(128,128,128,.18);
+			position:relative;
+			overflow:hidden;
+			transition: height .14s ease;
+			z-index:3;
+			flex:0 0 auto;
+		}
+		/* Invisible hover/click zone to survive zoom quirks */
+		.fc-handle::before {
+			content:"";
+			position:absolute;
+			left:0; right:0; top:0;
+			height:10px;
+			background:transparent;
+		}
+		.fc-handle.expanded {
+			height:24px;
+			min-height:18px;
+			background: rgba(128,128,128,.08);
+			border-bottom: 1px solid rgba(128,128,128,.25);
+		}
+		.fc-handle-top { border-bottom: 1px solid rgba(128,128,128,.12); }
+		.fc-handle-bot { border-top: 1px solid rgba(128,128,128,.12); }
+
+		/* Micro-toolbar inside the handle bar */
+		.fc-tools {
+			position:absolute;
+			left:8px; right:8px;
+			top:50%;
+			transform: translateY(-50%);
+			display:flex;
+			gap:4px;
+			align-items:center;
+			opacity:0;
+			pointer-events:none;
+			transition: opacity .12s ease;
+			z-index:4;
+		}
+		.fc-handle.expanded .fc-tools {
+			opacity:1;
+			pointer-events:auto;
+		}
+
 		.fc-flex {
 			flex:1 1 auto;
 			min-width:8px; /* will collapse away when space is tight */
 		}
 
 		/* smaller, more compact toolbar buttons */
-		.fc-controls .gbtn {
+		.fc-tools .gbtn {
 			padding:2px 4px;
 			font-size:0.9em;
 			line-height:1.1;
-			min-width:0;
 		}
 
 		/* visual pressed / toggled state for mode/auto/flipmode 
