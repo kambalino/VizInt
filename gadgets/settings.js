@@ -3,16 +3,16 @@
  *	File: gadgets/settings.js
  *	Gadget: Settings
  *	Description: Gadget settings and Portal options
- *	Author: K&K & U:Vz & U:Ux
+ *	Author: K&K & U:Vz & U:Ux & U:St
  * 
- *	$VER: 1.2.4
+ *	$VER: 1.2.5
  *
- * 
  *	$HISTORY:
- *	2025/11/30  1.2.4  Inline multi-instance child rows under class rows; hide old MI section; export SettingsRuntime
- *	2025/11/30  1.2.3  Multi-instance class rows use [+] in main list; excluded from enabledGadgets
- *	2025/11/30  1.2.2  Added SettingsRuntime plumbing for multi-instance manager (core vs UI split, 48:33)
- *	2025/11/29  1.2.1  Restored the actual settings gadget as a normal/removable gadget
+ *	2025-12-11	U:St	1.2.5	Wire MI instance up/down arrows to Portal.reorderTile (tileOrder authority), allowing cross-boundary moves.
+ *	2025/11/30	U:St	1.2.4	Inline multi-instance child rows under class rows; hide old MI section; export SettingsRuntime
+ *	2025/11/30	U:St	1.2.3	Multi-instance class rows use [+] in main list; excluded from enabledGadgets
+ *	2025/11/30	U:St	1.2.2	Added SettingsRuntime plumbing for multi-instance manager (core vs UI split, 48:33)
+ *	2025/11/29	U:St	1.2.1	Restored the actual settings gadget as a normal/removable gadget
  *
  */
 (function(){
@@ -494,142 +494,25 @@
 						nameSpan.style.cursor = 'text';
 						nameSpan.addEventListener('click', triggerRename);
 					}
-
+					
 					btnUp?.addEventListener('click', () => {
-						if (typeof portal.reorderInstance === 'function') {
-							try { portal.reorderInstance(classId, instanceId, 'up'); }
-							catch (err) { console.error('[Settings] reorderInstance(up) failed', err); }
+						if (portal && typeof portal.reorderTile === 'function') {
+							try { portal.reorderTile(classId, instanceId, 'up'); }
+							catch (err) { console.error('[Settings] reorderTile(up) failed', err); }
 						}
 					});
 
 					btnDown?.addEventListener('click', () => {
-						if (typeof portal.reorderInstance === 'function') {
-							try { portal.reorderInstance(classId, instanceId, 'down'); }
-							catch (err) { console.error('[Settings] reorderInstance(down) failed', err); }
+						if (portal && typeof portal.reorderTile === 'function') {
+							try { portal.reorderTile(classId, instanceId, 'down'); }
+							catch (err) { console.error('[Settings] reorderTile(down) failed', err); }
 						}
 					});
+
 				}
 			});
 		}
 
-
-		///! I already had this method below, but you asked me to add the version above, without indicating that we already had this - take a look and let me know which is preferrable. In the meantime, I'm commenting it out.
-		/*function injectMiChildren(parentLi, classKey, manifest, instanceCatalog) {
-			if (!instanceCatalog || !instanceCatalog[classKey]) return;
-
-			const entry   = instanceCatalog[classKey] || {};
-			const order   = Array.isArray(entry.order) ? entry.order.slice() : Object.keys(entry.records || {});
-			const records = entry.records || {};
-
-			if (!order.length) return;
-
-			let insertAfter = parentLi;
-			const iconEmoji = manifest.iconEmoji || manifest.icon || '🔁';
-
-			order.forEach(instanceId => {
-				const rec = records[instanceId];
-				if (!rec) return;
-
-				const name = rec.displayName || instanceId;
-				const li = document.createElement('li');
-				li.className = 'set-row grid8 mi-child-row';
-				li.dataset.miChild = '1';
-				li.dataset.classId = classKey;
-				li.dataset.instanceId = instanceId;
-
-				li.innerHTML = `
-          <div class="cell c-chk">
-            <button class="gbtn gbtn-xs mi-remove" aria-label="Remove instance">−</button>
-            <input type="checkbox"
-                   class="mi-vis"
-                   ${rec.visible !== false ? 'checked' : ''}
-                   aria-label="Show/hide instance">
-          </div>
-          <div class="cell c-ico">
-            <span class="g-iconbox mi-icon">${escapeHtml(iconEmoji)}</span>
-          </div>
-          <div class="cell c-name">
-            <span class="g-label truncate mi-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
-          </div>
-          <div class="cell c-cap cap1"></div>
-          <div class="cell c-cap cap2"></div>
-          <div class="cell c-cap cap3"></div>
-          <div class="cell c-up"><button class="gbtn gbtn-xs mi-up"   aria-label="Move instance up">▲</button></div>
-          <div class="cell c-dn"><button class="gbtn gbtn-xs mi-down" aria-label="Move instance down">▼</button></div>
-        `;
-
-				insertAfter.parentNode.insertBefore(li, insertAfter.nextSibling);
-				insertAfter = li;
-
-				// wire child-row events
-				const btnRemove = li.querySelector('.mi-remove');
-				const visChk    = li.querySelector('.mi-vis');
-				const nameSpan  = li.querySelector('.mi-name');
-				const btnUp     = li.querySelector('.mi-up');
-				const btnDown   = li.querySelector('.mi-down');
-
-				if (btnRemove) {
-					btnRemove.addEventListener('click', () => {
-						if (!portal || typeof portal.removeInstance !== 'function') return;
-						const ok = window.confirm('Remove this instance and its settings?');
-						if (!ok) return;
-						try {
-							portal.removeInstance(classKey, instanceId);
-						} catch (err) {
-							console.error('[Settings] removeInstance failed', err);
-						}
-					});
-				}
-
-				if (visChk) {
-					visChk.addEventListener('change', () => {
-						if (!portal || typeof portal.setInstanceVisibility !== 'function') {
-							console.warn('[Settings] setInstanceVisibility not available on Portal');
-							return;
-						}
-						try {
-							portal.setInstanceVisibility(classKey, instanceId, !!visChk.checked);
-						} catch (err) {
-							console.error('[Settings] setInstanceVisibility failed', err);
-						}
-					});
-				}
-
-				if (nameSpan) {
-					nameSpan.addEventListener('click', () => {
-						beginMiRename(li, classKey, instanceId, nameSpan.textContent || '');
-					});
-				}
-
-				if (btnUp) {
-					btnUp.addEventListener('click', () => {
-						if (!portal || typeof portal.reorderInstance !== 'function') {
-							console.warn('[Settings] reorderInstance not available on Portal');
-							return;
-						}
-						try {
-							portal.reorderInstance(classKey, instanceId, 'up');
-						} catch (err) {
-							console.error('[Settings] reorderInstance(up) failed', err);
-						}
-					});
-				}
-
-				if (btnDown) {
-					btnDown.addEventListener('click', () => {
-						if (!portal || typeof portal.reorderInstance !== 'function') {
-							console.warn('[Settings] reorderInstance not available on Portal');
-							return;
-						}
-						try {
-							portal.reorderInstance(classKey, instanceId, 'down');
-						} catch (err) {
-							console.error('[Settings] reorderInstance(down) failed', err);
-						}
-					});
-				}
-			});
-		}*/
 
 		function beginMiRename(row, classId, instanceId, currentName) {
 			const nameSpan = row.querySelector('.mi-name');
