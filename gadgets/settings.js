@@ -772,6 +772,27 @@
 			const li = e.target.closest('li');
 			if (!li || li.dataset.miChild === '1') return; // child rows have their own handlers
 
+			const id = li.dataset.id;
+			if (!id) return;
+
+			// v1.4+: if tileOrder exists, reordering is global via Portal.reorderTile()
+			const portal = window.Portal || null;
+			const s = portal && typeof portal.getSettings === 'function' ? portal.getSettings() : null;
+			const hasTileOrder = !!(s && Array.isArray(s.tileOrder) && s.tileOrder.length);
+
+			if (hasTileOrder && portal && typeof portal.reorderTile === 'function') {
+				const classId = (typeof normalizeClassId === 'function') ? normalizeClassId(id) : id;
+				if (e.target.classList.contains('move-up')) {
+					try { portal.reorderTile(classId, '__singleton__', 'up'); } catch (err) { console.error('[Settings] reorderTile(up) failed', err); }
+					return;
+				}
+				if (e.target.classList.contains('move-down')) {
+					try { portal.reorderTile(classId, '__singleton__', 'down'); } catch (err) { console.error('[Settings] reorderTile(down) failed', err); }
+					return;
+				}
+			}
+
+			// Legacy behavior: DOM reordering within the Settings list (enabledGadgets ordering)
 			const items = [...ul.children];
 			const idx = items.indexOf(li);
 			if (e.target.classList.contains('move-up') && idx > 0) {
