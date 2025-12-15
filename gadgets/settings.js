@@ -458,7 +458,17 @@
 				<div class="cell c-dn"><button class="gbtn gbtn-xs mi-down" aria-label="Move instance down">▼</button></div>
 				`;
 
-				insertAfter.parentNode.insertBefore(li, insertAfter.nextSibling);
+				if (insertAfter && insertAfter.parentNode) {
+					const parent = insertAfter.parentNode;
+					const anchor = insertAfter.nextSibling;
+
+					if (anchor && anchor.parentNode === parent) {
+						parent.insertBefore(li, anchor);
+					} else {
+						parent.appendChild(li);
+					}
+				}
+
 				insertAfter = li;
 
 				if (portal) {
@@ -793,14 +803,27 @@
 			}
 
 			// Legacy behavior: DOM reordering within the Settings list (enabledGadgets ordering)
-			const items = [...ul.children];
+
+			if (!ul) return;
+
+			// Recompute items defensively from the current ul
+			const items = [...ul.querySelectorAll(':scope > li')];
 			const idx = items.indexOf(li);
+			if (idx === -1) return;
+
 			if (e.target.classList.contains('move-up') && idx > 0) {
-				ul.insertBefore(li, items[idx - 1]);
+				const anchor = items[idx - 1];
+				if (anchor && anchor.parentNode === ul) ul.insertBefore(li, anchor);
+				else ul.appendChild(li);
 			} else if (e.target.classList.contains('move-down') && idx < items.length - 1) {
-				ul.insertBefore(items[idx + 1], li);
+				const next = items[idx + 1];
+				// To move DOWN, insert "next" before "li" is fine (swaps).
+				// But guard both nodes.
+				if (next && next.parentNode === ul && li.parentNode === ul) ul.insertBefore(next, li);
+				// else: do nothing (list is mid-refresh)
 			}
-			saveState();
+			saveState();	
+
 		});
 
 		ul.addEventListener('change', e => {
