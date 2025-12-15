@@ -1,6 +1,7 @@
 // gadgets/flashcards.js
-// $VER: FlashCards v0.4.3
+// $VER: FlashCards v0.4.4 — Weighted 👍👎 rotations per card; dual toolbars (top+bottom) w/ hover reveal
 // $HISTORY:
+//	v0.4.4 — Weighted 👍👎 rotations per card (Easy=1, Normal=2, Hard=4); add 👎👍 to top toolbar; per-card state persisted per instance
 //	v0.4.3 - EmbedWeb-style hidden hover toolbars (top/bottom); sweep moved to top; move 🗑️ into settings
 //	v0.4.2 - Fixed multi-instance re-entrancy - scoped variables, and delimiter heavy CSVs.
 //	v0.4.0 - Converted to multi-instance (_type:"multi"), _id:"default", registration via manifest._class (v1.2.2).
@@ -286,7 +287,8 @@
 						: 5000,
 				flipStyle:
 					persisted.flipStyle === "inline" ? "inline" : "reveal",
-				ui: Object.assign({ showConfig: false }, persisted.ui || {})
+				ui: Object.assign({ showConfig: false }, persisted.ui || {}),
+				marks: (persisted && persisted.marks && typeof persisted.marks === "object") ? { ...persisted.marks } : {}
 			};
 
 			console.debug("[Flashcards] mount() initial my", {
@@ -370,7 +372,13 @@
 							? patch.intervalMs
 							: current.intervalMs || 5000,
 					flipStyle: patternOr(patch.flipStyle, current.flipStyle, "reveal"),
-					ui: patch.ui !== undefined ? patch.ui : current.ui || { showConfig: false }
+					ui: patch.ui !== undefined ? patch.ui : current.ui || { showConfig: false },
+					marks:
+						patch.marks !== undefined
+							? patch.marks
+							: (current.marks && typeof current.marks === "object")
+							? current.marks
+							: {}
 				};
 
 				console.debug("[Flashcards] save() nextPersist", {
@@ -421,6 +429,8 @@
 								<button type="button" class="gbtn" data-fc="pin" title="Pin 📌">📌</button> |
 								<button type="button" class="gbtn" data-fc="copy" title="Copy 📋">📋</button>
 								<button type="button" class="gbtn" data-fc="share" title="Share">🔗</button>
+							<button type="button" class="gbtn" data-fc="down" title="Hard 👎" aria-pressed="false">👎</button>
+							<button type="button" class="gbtn" data-fc="up" title="Easy 👍" aria-pressed="false">👍</button>
 			*/
 			// DOM
 			host.innerHTML = `
@@ -431,6 +441,8 @@
 						<div class="fc-tools fc-tools-top">
 							<button type="button" class="gbtn" data-fc="copy" title="Copy 📋">📋</button>
 							<button type="button" class="gbtn" data-fc="share" title="Share">🔗</button>
+							<button type="button" class="gbtn" data-fc="down" title="Hard 👎" aria-pressed="false">👎</button>
+							<button type="button" class="gbtn" data-fc="up" title="Easy 👍" aria-pressed="false">👍</button>
 							<span class="fc-flex"></span>
 							<button type="button" class="gbtn" data-fc="reset" title="Reset Deck">🧹</button>
 						</div>
@@ -631,6 +643,9 @@
 			const autoBtn = elControls.querySelector('[data-fc="auto"]');
 			const flipModeBtn = elControls.querySelector('[data-fc="flipmode"]');
 
+			const downBtn = elControls.querySelector('[data-fc="down"]');
+			const upBtn = elControls.querySelector('[data-fc="up"]');
+
 			let timer = null;
 			let cdTimer = null; // countdown timer (for auto rem/total s)
 			let nextDueTs = 0;
@@ -727,10 +742,47 @@
 				else restartTimer();
 			}
 
+
+			// Per-card learning marks (per instance)
+			// marks[key] = "easy" | "hard" | undefined  (normal if unset)
+			function normKeyPart(s) {
+				return String(s || "")
+					.replace(/\s+/g, " ")
+					.trim();
+			}
+
+			function cardKeyAt(idx) {
+				const rec = my.parsed[idx] || {};
+				const a = normKeyPart(rec.a || rec.A || rec.front);
+				const b = normKeyPart(rec.b || rec.B || rec.back);
+				return `${a}\n${b}`;
+			}
+
+			function weightForIndex(idx) {
+				const key = cardKeyAt(idx);
+				const mark = my.marks ? my.marks[key] : undefined;
+				return mark === "hard" ? 4 : mark === "easy" ? 1 : 2;
+			}
+
+			function buildWeightedIndexList(mode) {
+				const n = my.parsed.length;
+				const out = [];
+				for (let i = 0; i < n; i++) {
+					const w = weightForIndex(i);
+					for (let k = 0; k < w; k++) out.push(i);
+				}
+				if (mode === "drand") return shuffle(out);
+				return out; // sequential order, expanded by weight
+			}
+
 			function buildCycle() {
 				const n = my.parsed.length;
-				const cycle = shuffle([...Array(n).keys()]);
-				console.debug("[Flashcards] buildCycle()", { n, cycle });
+				const cycle = buildWeightedIndexList(my.mode);
+				console.debug("[Flashcards] buildCycle()", {
+					n,
+					mode: my.mode,
+					cycleLen: cycle.length
+				});
 				return cycle;
 			}
 
@@ -741,6 +793,7 @@
 					mode: my.mode,
 					historyLen: my.history.length
 				});
+
 				if (!n) {
 					my.index = 0;
 					my.history = [];
@@ -748,52 +801,58 @@
 					my.cyclePos = 0;
 					my.prevCycleOrder = null;
 					my.futureCycleOrder = null;
+					my.seqOrder = null;
+					my.seqPos = 0;
 					return;
 				}
 
+				// drand
 				if (my.mode === "drand") {
 					my.cycleOrder = buildCycle();
 					my.cyclePos = 0;
-					my.index = my.cycleOrder[0];
+					my.index = my.cycleOrder[0] ?? 0;
 					my.history = [my.index];
 					my.prevCycleOrder = null;
 					my.futureCycleOrder = null;
 					console.debug("[Flashcards] ensureInitialIndex() drand start", {
 						index: my.index,
-						cycleOrder: my.cycleOrder
+						cycleLen: my.cycleOrder.length
 					});
 					return;
 				}
 
 				// sequential
-				if (!Array.isArray(my.history) || !my.history.length) {
-					my.index = clamp(my.index || 0, 0, n - 1);
-					my.history = [my.index];
-				} else {
-					my.index = clamp(my.index || 0, 0, n - 1);
-				}
+				my.seqOrder = buildWeightedIndexList("sequential");
+				my.seqPos = 0;
+				my.index = my.seqOrder[0] ?? 0;
+				my.history = [my.index];
 				console.debug("[Flashcards] ensureInitialIndex() seq start", {
 					index: my.index,
+					seqLen: my.seqOrder.length,
 					history: my.history
 				});
 			}
 
-			function reseedIfNeeded(force = false) {
+			function reseedIfNeeded(force) {
 				const n = my.parsed.length;
+
 				console.debug("[Flashcards] reseedIfNeeded()", {
-					force,
+					force: !!force,
 					n,
 					mode: my.mode,
-					hasCycleOrder: !!(my.cycleOrder && my.cycleOrder.length)
+					hasCycleOrder: !!(my.cycleOrder && my.cycleOrder.length),
+					hasSeqOrder: !!(my.seqOrder && my.seqOrder.length)
 				});
+
 				if (!n) {
-					my.pool = [];
-					my.history = [];
 					my.index = 0;
+					my.history = [];
 					my.cycleOrder = null;
 					my.prevCycleOrder = null;
 					my.futureCycleOrder = null;
 					my.cyclePos = 0;
+					my.seqOrder = null;
+					my.seqPos = 0;
 					return;
 				}
 
@@ -804,7 +863,16 @@
 						my.cycleOrder = buildCycle();
 						my.cyclePos = 0;
 					}
+					if (my.index == null) my.index = my.cycleOrder[0] ?? 0;
+					return;
 				}
+
+				// sequential
+				if (force || !Array.isArray(my.seqOrder) || !my.seqOrder.length) {
+					my.seqOrder = buildWeightedIndexList("sequential");
+					my.seqPos = 0;
+				}
+				if (my.index == null) my.index = my.seqOrder[0] ?? 0;
 			}
 
 			function takeNextIndex() {
@@ -812,11 +880,21 @@
 				if (!n) return 0;
 
 				if (my.mode === "sequential") {
-					const idx = (my.index + 1) % n;
+					if (!Array.isArray(my.seqOrder) || !my.seqOrder.length) {
+						my.seqOrder = buildWeightedIndexList("sequential");
+						my.seqPos = 0;
+					}
+
+					if (my.seqPos < my.seqOrder.length - 1) my.seqPos++;
+					else my.seqPos = 0;
+
+					const idx = my.seqOrder[my.seqPos] ?? 0;
 					my.history.push(idx);
 					my.index = idx;
 					console.debug("[Flashcards] takeNextIndex() seq", {
 						idx,
+						seqPos: my.seqPos,
+						seqLen: my.seqOrder.length,
 						historyLen: my.history.length
 					});
 					return idx;
@@ -828,6 +906,7 @@
 					my.cyclePos = 0;
 				}
 
+				// move forward within current cycle, or shift to future/new cycle
 				if (my.cyclePos < my.cycleOrder.length - 1) {
 					my.cyclePos++;
 				} else {
@@ -842,62 +921,86 @@
 						my.cyclePos = 0;
 					}
 				}
-
 				const idx = my.cycleOrder[my.cyclePos];
+
 				my.history.push(idx);
 				my.index = idx;
-				console.debug("[Flashcards] takeNextIndex() drand", {
+
+				console.debug("[Flashcards] takeNextIndex()", {
 					idx,
 					cyclePos: my.cyclePos,
-					cycleOrder: my.cycleOrder
+					cycleLen: my.cycleOrder.length,
+					historyLen: my.history.length
 				});
 				return idx;
 			}
 
 			function takePrevIndex() {
-				if (my.flipStyle === "reveal" && showingAnswer) {
-					showingAnswer = false;
-					console.debug("[Flashcards] takePrevIndex() flip back to question", {
-						index: my.index
-					});
-					return my.index || 0;
-				}
-
 				const n = my.parsed.length;
 				if (!n) return 0;
 
 				if (my.mode === "sequential") {
-					const idx = Math.max(0, (my.index || 0) - 1);
+					if (!Array.isArray(my.seqOrder) || !my.seqOrder.length) {
+						my.seqOrder = buildWeightedIndexList("sequential");
+						my.seqPos = 0;
+					}
+
+					if (showingAnswer) {
+						// prev when on side B should show side A first
+						showingAnswer = false;
+						render();
+						if (my.auto) restartTimer();
+						return my.index || 0;
+					}
+
+					if (my.seqPos > 0) my.seqPos--;
+					else my.seqPos = 0;
+
+					const idx = my.seqOrder[my.seqPos] ?? 0;
 					my.index = idx;
-					console.debug("[Flashcards] takePrevIndex() seq", { idx });
+					console.debug("[Flashcards] takePrevIndex() seq", {
+						idx,
+						seqPos: my.seqPos,
+						seqLen: my.seqOrder.length
+					});
 					return idx;
 				}
 
 				// drand
-				if (!Array.isArray(my.cycleOrder) || !my.cycleOrder.length) {
-					my.cycleOrder = buildCycle();
-					my.cyclePos = 0;
+				if (showingAnswer) {
+					showingAnswer = false;
+					render();
+					if (my.auto) restartTimer();
+					return my.index || 0;
 				}
 
-				if (my.cyclePos > 0) {
+				if (Array.isArray(my.cycleOrder) && my.cycleOrder.length && my.cyclePos > 0) {
 					my.cyclePos--;
-				} else if (Array.isArray(my.prevCycleOrder) && my.prevCycleOrder.length) {
-					my.futureCycleOrder = my.cycleOrder.slice();
+					const idx = my.cycleOrder[my.cyclePos];
+					my.index = idx;
+					console.debug("[Flashcards] takePrevIndex() drand", {
+						idx,
+						cyclePos: my.cyclePos
+					});
+					return idx;
+				}
+
+				// if we're at start of cycle, try jump to prevCycleOrder end
+				if (Array.isArray(my.prevCycleOrder) && my.prevCycleOrder.length) {
+					my.futureCycleOrder = my.cycleOrder ? my.cycleOrder.slice() : null;
 					my.cycleOrder = my.prevCycleOrder.slice();
 					my.prevCycleOrder = null;
 					my.cyclePos = my.cycleOrder.length - 1;
-				} else {
-					// Already at earliest allowed position
+					const idx = my.cycleOrder[my.cyclePos];
+					my.index = idx;
+					console.debug("[Flashcards] takePrevIndex() prev-cycle", {
+						idx,
+						cyclePos: my.cyclePos
+					});
+					return idx;
 				}
 
-				const idx = my.cycleOrder[my.cyclePos];
-				my.index = idx;
-				console.debug("[Flashcards] takePrevIndex() drand", {
-					idx,
-					cyclePos: my.cyclePos,
-					cycleOrder: my.cycleOrder
-				});
-				return idx;
+				return my.index || 0;
 			}
 
 			function getActiveTextForExport() {
@@ -993,33 +1096,33 @@
 			}
 
 			function updateStatus() {
+				if (!elStatus) return;
+
 				const n = my.parsed.length;
 				const idx = clamp(my.index || 0, 0, Math.max(0, n - 1));
-				const total = n;
-				const actual = total ? idx + 1 : 0;
 
-				let drandPos = actual;
-				if (
-					my.mode === "drand" &&
-					Array.isArray(my.cycleOrder) &&
-					my.cycleOrder.length
+				const totalUnique = n;
+				const actual = totalUnique ? idx + 1 : 0;
+
+				let pos = actual;
+				let total = totalUnique;
+
+				if (my.mode === "drand" && Array.isArray(my.cycleOrder) && my.cycleOrder.length) {
+					pos = my.cyclePos + 1;
+					total = my.cycleOrder.length;
+				} else if (
+					my.mode === "sequential" &&
+					Array.isArray(my.seqOrder) &&
+					my.seqOrder.length
 				) {
-					drandPos = my.cyclePos + 1;
+					pos = my.seqPos + 1;
+					total = my.seqOrder.length;
 				}
 
-				const modeTxt = my.mode === "drand" ? "drand" : "seq";
-				const totSec = (my.intervalMs || 5000) / 1000;
-				let autoTxt = "manual";
+				const modeTxt = my.mode === "sequential" ? "seq" : "drand";
+				const autoTxt = my.auto ? `${(my.intervalMs || 0) / 1000}s` : "paused";
 
-				if (my.auto) {
-					const rem = Math.max(
-						0,
-						Math.ceil((nextDueTs - Date.now()) / 1000)
-					);
-					autoTxt = `auto ${rem}/${totSec | 0}s`;
-				}
-
-				elStatus.textContent = `[ #${actual}~${drandPos}/${total} ] · ${modeTxt} · ${autoTxt}`;
+				elStatus.textContent = `[ #${actual}~${pos}/${total} ] · ${modeTxt} · ${autoTxt}`;
 			}
 
 			function updateToggleButtonStates() {
@@ -1038,6 +1141,22 @@
 					const on = my.flipStyle === "inline";
 					flipModeBtn.classList.toggle("is-on", on);
 					flipModeBtn.setAttribute("aria-pressed", on ? "true" : "false");
+				}
+
+				// Per-card Easy/Hard marks
+				const n = my.parsed.length;
+				const idx = clamp(my.index || 0, 0, Math.max(0, n - 1));
+				const k = n ? cardKeyAt(idx) : "";
+
+				if (downBtn) {
+					const on = !!(k && my.marks && my.marks[k] === "hard");
+					downBtn.classList.toggle("is-on", on);
+					downBtn.setAttribute("aria-pressed", on ? "true" : "false");
+				}
+				if (upBtn) {
+					const on = !!(k && my.marks && my.marks[k] === "easy");
+					upBtn.classList.toggle("is-on", on);
+					upBtn.setAttribute("aria-pressed", on ? "true" : "false");
 				}
 			}
 
@@ -1174,9 +1293,6 @@
 					showingAnswer = false;
 					render();
 					if (my.auto) restartTimer();
-				} else if (act === "up" || act === "down") {
-					// ///! Placeholder for Spaced Repetition vNext (👍/👎). For now, no-op.
-					console.debug("[Flashcards] feedback", { act, idx: my.index });
 				} else if (act === "viewall" || act === "viewfav") {
 					// ///! Placeholder for Favorites view toggle (♥ / ❤️).
 					console.debug("[Flashcards] view mode toggle", { act });
@@ -1195,6 +1311,45 @@
 						`When: ${stamp}\n\n` +
 						txt;
 					copyToClipboard(payload);
+				} else if (act === "down") { // 👎
+					// Toggle Hard (double rotation weight)
+					const n = my.parsed.length;
+					if (!n) return;
+					const idx = clamp(my.index || 0, 0, Math.max(0, n - 1));
+					const k = cardKeyAt(idx);
+
+					if (!my.marks || typeof my.marks !== "object") my.marks = {};
+					const cur = my.marks[k];
+
+					if (cur === "hard") delete my.marks[k];
+					else my.marks[k] = "hard";
+
+					// Mutually exclusive on same card (easy vs hard)
+					if (my.marks[k] === "hard") {
+						// nothing else to clear (single value)
+					}
+
+					save({ marks: my.marks });
+					reseedIfNeeded(true);
+					updateToggleButtonStates();
+					updateStatus();
+				} else if (act === "up") { // 👍
+					// Toggle Easy (half rotation weight)
+					const n = my.parsed.length;
+					if (!n) return;
+					const idx = clamp(my.index || 0, 0, Math.max(0, n - 1));
+					const k = cardKeyAt(idx);
+
+					if (!my.marks || typeof my.marks !== "object") my.marks = {};
+					const cur = my.marks[k];
+
+					if (cur === "easy") delete my.marks[k];
+					else my.marks[k] = "easy";
+
+					save({ marks: my.marks });
+					reseedIfNeeded(true);
+					updateToggleButtonStates();
+					updateStatus();
 				} else if (act === "reset") {
 					console.debug("[Flashcards] reset button");
 					stopTimer();
