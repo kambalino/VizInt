@@ -46,11 +46,14 @@
   // Defaults
   // ----------------------------
   var DEFAULTS = {
-    masjid: { name: "Masjid", locationHint: "" },
+	masjid: { name: "Masjid", locationHint: "" },
     feed: { url: "https://masjidalwadood.com/api/rss.php", mode: "rss", parseStrategy: "auto" },
-    refreshSeconds: 60,
-    display: { showArabicLabel: true, largeTypography: true },
-    debug: { showLastFetch: false, showParseDetails: false }
+	refreshSeconds: 60,
+	display: { showArabicLabel: true, largeTypography: true },
+	behavior: {
+		commuteMinutes: 5
+	},
+	debug: { showLastFetch: false, showParseDetails: false }	
   };
 
   // ----------------------------
@@ -243,6 +246,30 @@
       if (rows[i].iqamaDate.getTime() > now.getTime()) { nextIdx = i; break; }
     }
 
+	    // If the next iqama is the FIRST one of the day (usually Fajr),
+    // we still want a progress bar from the PREVIOUS day's last iqama (Isha) -> this Fajr.
+    if (nextIdx === 0) {
+      var next0 = rows[0];
+      var prevLast = rows[rows.length - 1];
+
+      var prevHMS0 = parseHMS(prevLast.iqamaStr);
+      if (prevHMS0) {
+        var prevDate0 = buildLocalDate(state.ymd, prevHMS0, -1); // yesterday's Isha time-of-day
+        var prevSynthetic = Object.assign({}, prevLast, { iqamaDate: prevDate0 });
+
+        return {
+          prev: prevSynthetic,
+          next: next0,
+          prevName: prevLast.name,
+          nextName: next0.name,
+          isTomorrowAssumption: false,
+          __syntheticPrevFromYesterday: true
+        };
+      }
+      // If parsing fails, fall through to existing logic (bar may not render).
+    }
+
+
     // If none left today, target "tomorrow Fajr" using today's Fajr time-of-day (RSS limitation acknowledged).
     if (nextIdx === -1) {
       var fajrIdx = -1;
@@ -329,7 +356,7 @@ style.textContent = `
 
 .miq-row{
   display:grid;
-  grid-template-columns: 90px 90px 90px;
+  grid-template-columns: minmax(48px, 1fr) minmax(64px, 1fr) auto;
   align-items:baseline;
   gap:12px;
 }
@@ -347,16 +374,22 @@ style.textContent = `
 .miq-row > div{
   overflow:hidden;
   text-overflow:ellipsis;
+  white-space:nowrap;              /* ensures no wrap */
+  min-width:0;                     /* allows ellipsis in grid */
 }
+
+.miq-row > div:nth-child(1){ text-align:left; }
+.miq-row > div:nth-child(2){ text-align:center; }
+.miq-row > div:nth-child(3){ text-align:right; }
 
 .miq-pr{opacity:.92;font-weight:700;text-align:left;}
 .miq-ad{opacity:.85;text-align:center;}
-.miq-iq{opacity:1;text-align:center;}
+.miq-iq{opacity:1;text-align:right;} /* align iqama times consistently */
 .miq-iq strong{font-weight:900}
 
 .miq-next{
   border-radius:10px;
-  padding:4px 6px;
+  padding:4px 0;                 /* ✅ REMOVE horizontal padding */
   background:rgba(255,255,255,.06);
   border:1px solid rgba(255,255,255,.12);
 }
@@ -404,6 +437,7 @@ style.textContent = `
   pointer-events:none;
   color:rgba(255,255,255,.95);
   text-shadow:0 1px 0 rgba(0,0,0,.25);
+  max-width: calc(100% - 16px);
 }
 
 .miq-barPct{
@@ -456,7 +490,6 @@ style.textContent = `
     header.appendChild(hl);
     header.appendChild(hc);
     header.appendChild(hr);
-    header.appendChild(refreshBtn);
 
     var settings = document.createElement("div");
     settings.className = "miq-settings";
@@ -475,6 +508,7 @@ style.textContent = `
     var foot = document.createElement("div");
     foot.className = "miq-foot";
 
+
     var footL = document.createElement("div");
     var footR = document.createElement("div");
     foot.appendChild(footL);
@@ -486,6 +520,7 @@ style.textContent = `
     root.appendChild(err);
     root.appendChild(debug);
     root.appendChild(foot);
+	foot.appendChild(refreshBtn);
 
     host.appendChild(root);
 
@@ -708,7 +743,7 @@ style.textContent = `
 
 	  var urgent = remainMs < (20 * 60 * 1000);
 
-      var timeText = under10m ? fmtMMSS(remainMs) : fmtHHMM(remainMs);
+      var timeText = urgent ? fmtMMSS(remainMs) : fmtHHMM(remainMs);
       var labelText = "⏱ " + timeText + " left";
 
       var container = document.createElement("div");
@@ -727,18 +762,35 @@ style.textContent = `
       fill.className = "miq-barFill";
       fill.style.width = (pctRemain * 100).toFixed(2) + "%";
 
-      var label = document.createElement("div");
-      label.className = "miq-barLabel";
+	var label = document.createElement("div");
+	label.className = "miq-barLabel";
+	label.textContent = labelText;
 
-      // float label to side with more remaining space
-      if (pctRemain >= 0.55) {
-        label.style.left = "0px";
-      } else {
-        label.style.right = "0px";
-      }
-      label.textContent = labelText;
+	// Anchor label fully INSIDE the larger segment.
+	// NOTE: fill is right-anchored (remaining portion is on the RIGHT).
+	var onFill = (pctRemain >= 0.5);
 
-      bar.appendChild(fill);
+	if (onFill) {
+		// Remaining (fill) is larger => place label on RIGHT side (inside fill)
+		label.style.right = "8px";
+		label.style.left = "auto";
+		label.style.textAlign = "right";
+
+		// White text works on blue/red fill
+		label.style.color = "rgba(255,255,255,.95)";
+		label.style.textShadow = "0 1px 0 rgba(0,0,0,.25)";
+	} else {
+		// Empty (gray) is larger => place label on LEFT side (inside empty)
+		label.style.left = "8px";
+		label.style.right = "auto";
+		label.style.textAlign = "left";
+
+		// Dark text works on the gray background
+		label.style.color = "rgba(0,0,0,.70)";
+		label.style.textShadow = "none";
+	}
+
+	  bar.appendChild(fill);
       bar.appendChild(label);
 
       var pct = document.createElement("div");
@@ -754,13 +806,24 @@ style.textContent = `
       ui.footL.textContent = String(minutesRemaining(remainMs)) + " minutes remaining";
     }
 
-    for (var i = 0; i < rows.length; i++) {
-      var r = rows[i];
-      addPrayerRow(r, (nextName && r.name === nextName));
-      if (prevName && r.name === prevName) {
-        addIntervalBar(interval.prev, interval.next);
-      }
-    }
+	var barInserted = false;
+
+	for (var i = 0; i < rows.length; i++) {
+		var r = rows[i];
+		addPrayerRow(r, (nextName && r.name === nextName));
+
+		if (!barInserted && prevName && r.name === prevName) {
+			addIntervalBar(interval.prev, interval.next);
+			barInserted = true;
+		}
+	}
+
+	// 🔒 SAFETY NET:
+	// If we crossed midnight and couldn't match prevName in rows,
+	// still render the bar AFTER the table.
+	if (!barInserted && interval && interval.prev && interval.next) {
+		addIntervalBar(interval.prev, interval.next);
+	}
 
     // If we couldn't insert (prev missing), still compute footer
     if (!prevName) {
