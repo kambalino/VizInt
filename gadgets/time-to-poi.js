@@ -1,12 +1,16 @@
 /*
- * $VER: Time to POI Gadget v1.0 (2024-06-15)
+ * $VER: Time to POI Gadget v0.2.0 (2026-01-18)
  * $DESCRIPTION:
- * A gadget that displays the time remaining to reach a specified Point of Interest (POI).
+ * Multi-instance gadget that displays live “time-to-drive” estimates from an origin to configured POIs.
+ * v0.2.0 adds:
+ *  - TomTom provider (routing + geocoding) when key is present
+ *  - Address-first POI editor with auto-geocoding on Save
+ *  - Routing guard: never routes unresolved POIs (prevents 0,0 / 400 spam)
+ *  - Clear degraded states: OFFLINE / BLOCKED / NEEDS CONFIG / RATE LIMITED / UNRESOLVED
  *
- * $HISTORY: 
- * 
- * 2026/01/16	1.0.0	Initial public release.
- * 
+ * $HISTORY:
+ * 2026/01/18  0.2.0  TomTom-first (when key present) + address-first POIs + auto-geocode + routing guard.
+ * 2026/01/16  0.1.0  OSRM-first baseline.
  */
 
 (function () {
@@ -17,15 +21,15 @@
     _class: "time-to-poi",
     _type: "multi",
     _id: "default",
-    _ver: "0.1.0",
+    _ver: "0.2.0",
     label: "Time to POI",
     iconEmoji: "🚗",
-    capabilities: ["network", "atlas"], // atlas for best-effort coarse geo fallback
+    capabilities: ["network", "atlas"],
     supportsSettings: true,
-    verBlurb: "OSRM-first (keyless) live ETA list with graceful degraded states.",
+    verBlurb: "TomTom-first when key present; address-first POIs with auto-geocoding; OSRM fallback.",
   };
 
-  // Per-instance runtime state (no globals per-instance)
+  // Per-instance runtime state (no global singletons)
   const STATE = new WeakMap();
 
   function nowMs() { return Date.now(); }
@@ -41,22 +45,27 @@
     catch (_) { return x; }
   }
 
+  function sleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
   function defaultSettings() {
     return {
-      provider: "osrm", // "osrm" | "custom" (v0.1.0 uses OSRM adapter)
+      // Stored provider is advisory; effective provider is resolved per-instance (TomTom if key present)
+      provider: "osrm", // "osrm" | "tomtom" | "custom" (custom is OSRM-compatible URL)
       refreshSeconds: 300,
       paused: false,
 
-      // OSRM endpoint (best-effort default). User can override.
-      // NOTE: public endpoints may rate-limit. This is expected.
       endpoints: {
-        osrmBaseUrl: "https://router.project-osrm.org"
+        osrmBaseUrl: "https://router.project-osrm.org",
+        tomtomBaseUrl: "https://api.tomtom.com",
+        nominatimUrl: "https://nominatim.openstreetmap.org/search",
       },
 
       origin: {
-        mode: "currentLocation", // per Addendum A-ADD-3 default
+        mode: "currentLocation",
         label: "Current location",
-        fixed: { lat: null, lon: null }
+        fixed: { lat: null, lon: null },
       },
 
       pois: [],
@@ -64,76 +73,33 @@
       display: {
         maxItems: 6,
         sort: "asEntered", // "asEntered" | "shortestETA" | "alpha"
-        showLastUpdated: true
+        showLastUpdated: true,
       },
 
       privacy: {
         allowLocation: true,
-        redactExactCoordsInUI: false
+        redactExactCoordsInUI: false,
       },
 
-      // Present in spec, but we are explicitly punting API keys in v0.1.0
+      // Interim secret storage (explicitly allowed by user for now): store TomTom key here.
+      // Future VizInt secrets support could resolve apiKeyRef instead.
       auth: {
-        apiKeyRef: ""
+        apiKeyRef: "",
+        apiKey: {
+          tomtom: "",
+        },
       },
 
-      // Internal cache extension (non-breaking)
       _cache: {
         lastUpdatedMs: 0,
-        resultsByPoiId: {} // { [poiId]: { etaSeconds, distanceMeters, status, atMs } }
-      }
+        resultsByPoiId: {},
+      },
     };
-  }
-
-// ---- Geocoding (Nominatim / OSM) ----
-// NOTE: Nominatim requires a User-Agent. If you have a VizInt-wide UA policy, replace this header accordingly.
-async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
-  const url = (nominatimUrl || "https://nominatim.openstreetmap.org/search")
-    + "?format=json&limit=1&q=" + encodeURIComponent(query);
-
-  const ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
-  const t = timeoutMs ? setTimeout(() => { try { ctrl && ctrl.abort(); } catch {} }, timeoutMs) : null;
-
-  try {
-    const resp = await fetch(url, {
-      signal: ctrl ? ctrl.signal : undefined,
-      headers: {
-        "User-Agent": "VizInt-TimeToPOI/0.1 (no-email)" // keep short; replace if you have a standard
-      }
-    });
-
-    if (!resp.ok) return { ok:false, code: resp.status, lat:null, lon:null };
-
-    const data = await resp.json();
-    if (!data || !data.length) return { ok:false, code: 404, lat:null, lon:null };
-
-    const lat = Number(data[0].lat);
-    const lon = Number(data[0].lon);
-    if (!isFinite(lat) || !isFinite(lon)) return { ok:false, code: 422, lat:null, lon:null };
-
-    return { ok:true, code:200, lat, lon };
-  } catch (e) {
-    // Abort or network fail
-    return { ok:false, code: 0, lat:null, lon:null };
-  } finally {
-    if (t) clearTimeout(t);
-  }
-}
-
-
-  function getSettings(ctx) {
-    // Spec: do NOT write settings in mount() for defaults
-    const def = defaultSettings();
-    const s = ctx.getSettings ? ctx.getSettings("settings", def) : def;
-    // Merge shallowly with defaults to tolerate missing fields
-    return deepMergeDefaults(safeJsonClone(s), def);
   }
 
   function deepMergeDefaults(obj, def) {
     if (obj == null || typeof obj !== "object") return safeJsonClone(def);
     const out = Array.isArray(def) ? (Array.isArray(obj) ? obj : []) : obj;
-
-    // Ensure any default keys exist
     for (const k in def) {
       const dv = def[k];
       const ov = out[k];
@@ -144,6 +110,12 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
       }
     }
     return out;
+  }
+
+  function getSettings(ctx) {
+    const def = defaultSettings();
+    const s = ctx.getSettings ? ctx.getSettings("settings", def) : def;
+    return deepMergeDefaults(safeJsonClone(s), def);
   }
 
   function setSettings(ctx, nextSettings) {
@@ -160,13 +132,11 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
   function formatKm(distanceMeters) {
     if (!isFinite(distanceMeters)) return "";
     const km = distanceMeters / 1000;
-    // keep short, no fancy i18n
     const s = (km < 10) ? km.toFixed(1) : km.toFixed(0);
     return s + " km";
   }
 
   function parseCtxDisplayName(ctx) {
-    // ctx.name is like "Vz:<Class>:<Instance>"
     const n = (ctx && ctx.name) ? String(ctx.name) : "";
     const parts = n.split(":");
     if (parts.length >= 3) return parts.slice(2).join(":");
@@ -214,7 +184,6 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
   }
 
   function classifyFetchError(err) {
-    // Under file:// or blocked CORS, fetch often throws TypeError
     if (!err) return { kind: "error", label: "ERROR" };
     const msg = String(err && err.message ? err.message : err);
     if (msg.toLowerCase().includes("failed to fetch") || err.name === "TypeError") {
@@ -223,12 +192,115 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
     return { kind: "error", label: "ERROR" };
   }
 
+  function trimTrailingSlash(s) {
+    s = String(s || "");
+    while (s.endsWith("/")) s = s.slice(0, -1);
+    return s;
+  }
+
+  // --- Provider priority resolver (per instance) ---
+  function getTomTomKey(settings, ctx) {
+    // Interim: key stored in settings
+    const direct = settings && settings.auth && settings.auth.apiKey && settings.auth.apiKey.tomtom;
+    const directKey = direct ? String(direct).trim() : "";
+    if (directKey) return directKey;
+
+    // Future-proof: allow a secret resolver if VizInt adds it
+    const ref = settings && settings.auth && settings.auth.apiKeyRef ? String(settings.auth.apiKeyRef).trim() : "";
+    if (ref && ctx && typeof ctx.getSecret === "function") {
+      try {
+        const v = ctx.getSecret(ref);
+        if (v) return String(v).trim();
+      } catch (_) {}
+    }
+
+    return "";
+  }
+
+  function resolveEffectiveProvider(settings, ctx) {
+    const key = getTomTomKey(settings, ctx);
+    if (key) return "tomtom";
+    // Keep old behavior: default to osrm even if broken (user asked to fix later)
+    const p = (settings && settings.provider) ? String(settings.provider) : "osrm";
+    return p || "osrm";
+  }
+
+  // ---- Geocoding ----
+  // Nominatim requires a User-Agent. Keep short; replace if you have a VizInt standard.
+  async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
+    const url = (nominatimUrl || "https://nominatim.openstreetmap.org/search")
+      + "?format=json&limit=1&q=" + encodeURIComponent(query);
+
+    const ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    const t = timeoutMs ? setTimeout(() => { try { ctrl && ctrl.abort(); } catch {} }, timeoutMs) : null;
+
+    try {
+      const resp = await fetch(url, {
+        signal: ctrl ? ctrl.signal : undefined,
+        headers: {
+          "User-Agent": "VizInt-TimeToPOI/0.2 (no-email)",
+        },
+      });
+
+      if (!resp.ok) return { ok: false, code: resp.status, lat: null, lon: null };
+      const data = await resp.json();
+      if (!data || !data.length) return { ok: false, code: 404, lat: null, lon: null };
+      const lat = Number(data[0].lat);
+      const lon = Number(data[0].lon);
+      if (!isFinite(lat) || !isFinite(lon)) return { ok: false, code: 422, lat: null, lon: null };
+      return { ok: true, code: 200, lat, lon };
+    } catch (e) {
+      return { ok: false, code: 0, lat: null, lon: null };
+    } finally {
+      if (t) clearTimeout(t);
+    }
+  }
+
+  async function geocodeTomTomOne(query, tomtomBaseUrl, apiKey, timeoutMs) {
+    const base = trimTrailingSlash(tomtomBaseUrl || "https://api.tomtom.com");
+    const url = base + "/search/2/geocode/" + encodeURIComponent(query) + ".json?limit=1&key=" + encodeURIComponent(apiKey);
+
+    const ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    const t = timeoutMs ? setTimeout(() => { try { ctrl && ctrl.abort(); } catch {} }, timeoutMs) : null;
+
+    try {
+      const resp = await fetch(url, { signal: ctrl ? ctrl.signal : undefined, method: "GET" });
+      if (!resp.ok) return { ok: false, code: resp.status, lat: null, lon: null };
+      const data = await resp.json();
+      const r0 = data && data.results && data.results[0];
+      const pos = r0 && r0.position;
+      const lat = pos ? Number(pos.lat) : NaN;
+      const lon = pos ? Number(pos.lon) : NaN;
+      if (!isFinite(lat) || !isFinite(lon)) return { ok: false, code: 404, lat: null, lon: null };
+      return { ok: true, code: 200, lat, lon };
+    } catch (e) {
+      return { ok: false, code: 0, lat: null, lon: null };
+    } finally {
+      if (t) clearTimeout(t);
+    }
+  }
+
+  async function geocodeOne(settings, ctx, query) {
+    const q = String(query || "").trim();
+    if (!q) return { ok: false, code: 400, lat: null, lon: null, provider: "none" };
+
+    const key = getTomTomKey(settings, ctx);
+    const endpoints = (settings && settings.endpoints) ? settings.endpoints : {};
+    const tomtomBaseUrl = endpoints.tomtomBaseUrl || "https://api.tomtom.com";
+    const nominatimUrl = endpoints.nominatimUrl || "https://nominatim.openstreetmap.org/search";
+
+    // Prefer TomTom geocoder if key present, else Nominatim
+    if (key) {
+      const r = await geocodeTomTomOne(q, tomtomBaseUrl, key, 8000);
+      return { ...r, provider: "tomtom" };
+    }
+
+    const r = await geocodeNominatimOne(q, nominatimUrl, 8000);
+    return { ...r, provider: "nominatim" };
+  }
+
+  // ---- Origin resolution ----
   async function bestEffortGeo(ctx, settings) {
-    // Returns { lat, lon, source } or null
-    // Priority:
-    // 1) navigator.geolocation if allowed & available
-    // 2) Atlas.getBestGeo() (coarse)
-    // 3) fixed origin if set
     const o = settings.origin || {};
     const privacy = settings.privacy || {};
     const allowLoc = !!privacy.allowLocation;
@@ -239,7 +311,6 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
       return null;
     }
 
-    // currentLocation
     if (allowLoc && navigator.geolocation && typeof navigator.geolocation.getCurrentPosition === "function") {
       const pos = await new Promise((resolve) => {
         navigator.geolocation.getCurrentPosition(
@@ -253,32 +324,25 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
         const lon = Number(pos.p.coords.longitude);
         if (isFinite(lat) && isFinite(lon)) return { lat, lon, source: "geolocation" };
       }
-      // If denied/unavailable, fall through to Atlas best-effort
     }
 
-    // Atlas fallback (coarse / IP-based / last-known depending on implementation)
     try {
       if (ctx && ctx.libs && ctx.libs.Atlas && ctx.libs.Atlas.ready) {
         await ctx.libs.Atlas.ready;
         const geo = ctx.libs.Atlas.getBestGeo ? ctx.libs.Atlas.getBestGeo() : null;
-        // Try to support a few plausible shapes without assuming too much
         const lat = geo && (geo.lat ?? (geo.coords && geo.coords.lat));
         const lon = geo && (geo.lon ?? geo.lng ?? (geo.coords && (geo.coords.lon ?? geo.coords.lng)));
         if (isFinite(lat) && isFinite(lon)) return { lat: Number(lat), lon: Number(lon), source: "atlas" };
       }
-    } catch (_) {
-      // ignore
-    }
+    } catch (_) {}
 
-    // Last resort: fixed origin if present
     const f = (o.fixed || {});
     if (isFinite(f.lat) && isFinite(f.lon)) return { lat: Number(f.lat), lon: Number(f.lon), source: "fixed" };
-
     return null;
   }
 
+  // ---- Routing providers ----
   function osrmRouteUrl(baseUrl, origin, dest) {
-    // OSRM expects lon,lat pairs
     const o = origin.lon + "," + origin.lat;
     const d = dest.lon + "," + dest.lat;
     const path = "/route/v1/driving/" + o + ";" + d;
@@ -286,10 +350,69 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
     return trimTrailingSlash(baseUrl) + path + qs;
   }
 
-  function trimTrailingSlash(s) {
-    s = String(s || "");
-    while (s.endsWith("/")) s = s.slice(0, -1);
-    return s;
+  function tomtomRouteUrl(tomtomBaseUrl, origin, dest, apiKey) {
+    const base = trimTrailingSlash(tomtomBaseUrl || "https://api.tomtom.com");
+    // TomTom expects lat,lon:lat,lon
+    const loc = origin.lat + "," + origin.lon + ":" + dest.lat + "," + dest.lon;
+    // traffic=true uses live traffic where available
+    return base + "/routing/1/calculateRoute/" + encodeURIComponent(loc) + "/json?traffic=true&key=" + encodeURIComponent(apiKey);
+  }
+
+  async function routeOne(settings, ctx, origin, dest) {
+    const effProvider = resolveEffectiveProvider(settings, ctx);
+    const endpoints = settings.endpoints || {};
+    const osrmBaseUrl = endpoints.osrmBaseUrl || "https://router.project-osrm.org";
+    const tomtomBaseUrl = endpoints.tomtomBaseUrl || "https://api.tomtom.com";
+    const tomtomKey = getTomTomKey(settings, ctx);
+
+    if (effProvider === "tomtom") {
+      if (!tomtomKey) return { status: "needsConfig", etaSeconds: NaN, distanceMeters: NaN };
+      const url = tomtomRouteUrl(tomtomBaseUrl, origin, dest, tomtomKey);
+      let resp;
+      try {
+        resp = await fetch(url, { method: "GET" });
+      } catch (e) {
+        const c = classifyFetchError(e);
+        return { status: c.kind, etaSeconds: NaN, distanceMeters: NaN };
+      }
+      if (resp.status === 429) return { status: "rateLimited", etaSeconds: NaN, distanceMeters: NaN };
+      if (!resp.ok) {
+        const kind = (resp.status === 401 || resp.status === 403) ? "needsConfig" : "error";
+        return { status: kind, etaSeconds: NaN, distanceMeters: NaN };
+      }
+      let data = null;
+      try { data = await resp.json(); } catch (_) {}
+      const r0 = data && data.routes && data.routes[0];
+      const sum = r0 && r0.summary;
+      const eta = sum && isFinite(sum.travelTimeInSeconds) ? Number(sum.travelTimeInSeconds) : NaN;
+      const dist = sum && isFinite(sum.lengthInMeters) ? Number(sum.lengthInMeters) : NaN;
+      if (isFinite(eta)) return { status: "ok", etaSeconds: eta, distanceMeters: dist };
+      return { status: "error", etaSeconds: NaN, distanceMeters: NaN };
+    }
+
+    // OSRM fallback
+    const url = osrmRouteUrl(osrmBaseUrl, origin, dest);
+    let resp;
+    try {
+      resp = await fetch(url, { method: "GET" });
+    } catch (e) {
+      const c = classifyFetchError(e);
+      return { status: c.kind, etaSeconds: NaN, distanceMeters: NaN };
+    }
+    if (resp.status === 429) return { status: "rateLimited", etaSeconds: NaN, distanceMeters: NaN };
+    if (!resp.ok) return { status: "error", etaSeconds: NaN, distanceMeters: NaN };
+
+    let data = null;
+    try { data = await resp.json(); } catch (_) {}
+    const route = data && data.routes && data.routes[0];
+    if (route && isFinite(route.duration)) {
+      return {
+        status: "ok",
+        etaSeconds: Number(route.duration),
+        distanceMeters: isFinite(route.distance) ? Number(route.distance) : NaN,
+      };
+    }
+    return { status: "error", etaSeconds: NaN, distanceMeters: NaN };
   }
 
   function sortPois(pois, resultsByPoiId, sortMode) {
@@ -309,8 +432,17 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
       });
       return list;
     }
-    // asEntered
     return list;
+  }
+
+  function getDestLatLon(poi) {
+    const d = poi && poi.destination ? poi.destination : null;
+    if (!d) return null;
+    const lat = Number(d.lat);
+    const lon = Number(d.lon);
+    if (!isFinite(lat) || !isFinite(lon)) return null;
+    if (lat === 0 && lon === 0) return null;
+    return { lat, lon };
   }
 
   function render(host, ctx) {
@@ -348,40 +480,26 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
     }, settings.paused ? "▶" : "⏸");
 
     const headerRight = mkEl("div", { class: "ttpt-actions" }, [btnRefresh, btnPause, btnSettings]);
-
     const header = mkEl("div", { class: "ttpt-header" }, [headerLeft, headerRight]);
 
     const body = mkEl("div", { class: "ttpt-body" });
     const list = mkEl("div", { class: "ttpt-list" });
-
     const foot = mkEl("div", { class: "ttpt-foot" });
 
-    // Compute top-level state badges
-    if (!navigator.onLine) {
-      badges.appendChild(mkBadge("OFFLINE", "warn"));
-    } else {
-      badges.appendChild(mkBadge("ONLINE", "ok"));
-    }
+    // Connectivity badge
+    badges.appendChild(!navigator.onLine ? mkBadge("OFFLINE", "warn") : mkBadge("ONLINE", "ok"));
+    if (isProbablyFileProtocol()) badges.appendChild(mkBadge("file://", "muted"));
 
-    if (isProbablyFileProtocol()) {
-      // We still mount; show a gentle warning because network + CORS can be tricky under file://
-      badges.appendChild(mkBadge("file://", "muted"));
-    }
-
-    // Config readiness
     const enabledPois = (settings.pois || []).filter(p => p && p.enabled !== false);
-    const hasPois = enabledPois.length > 0;
+    if (!enabledPois.length) badges.appendChild(mkBadge("NEEDS POIs", "warn"));
 
     const originMode = (settings.origin && settings.origin.mode) || "currentLocation";
     const fixedOk = settings.origin && settings.origin.fixed && isFinite(settings.origin.fixed.lat) && isFinite(settings.origin.fixed.lon);
-    const originOk = (originMode === "fixed") ? fixedOk : true; // currentLocation may still be denied; handled during refresh
+    if (originMode === "fixed" && !fixedOk) badges.appendChild(mkBadge("NEEDS ORIGIN", "warn"));
 
-    if (!hasPois) {
-      badges.appendChild(mkBadge("NEEDS POIs", "warn"));
-    }
-    if (!originOk && originMode === "fixed") {
-      badges.appendChild(mkBadge("NEEDS ORIGIN", "warn"));
-    }
+    // Provider badge (effective)
+    const effProvider = resolveEffectiveProvider(settings, ctx);
+    badges.appendChild(mkBadge(String(effProvider).toUpperCase(), "muted"));
 
     // Last updated
     const lu = settings._cache && settings._cache.lastUpdatedMs ? settings._cache.lastUpdatedMs : 0;
@@ -405,22 +523,25 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
         const left = mkEl("div", { class: "ttpt-row-left" });
         const name = mkEl("div", { class: "ttpt-poi-name" }, poi.name || "(Unnamed POI)");
 
-        const dest = poi.destination || {};
-        const hasLatLon = (dest.mode === "latlon" && isFinite(dest.lat) && isFinite(dest.lon));
-        if (!hasLatLon) {
-          name.appendChild(mkBadge("NEEDS LAT/LON", "warn"));
+        const destLL = getDestLatLon(poi);
+        const dq = poi && poi.destination ? String(poi.destination.query || poi.destination.address || "").trim() : "";
+        if (!destLL) {
+          name.appendChild(mkBadge(dq ? "UNRESOLVED" : "NEEDS ADDRESS", "warn"));
         }
-
         left.appendChild(name);
 
         const right = mkEl("div", { class: "ttpt-row-right" });
-
         const r = resultsByPoiId[poi.id] || {};
+
         if (r.status === "ok") {
-          const eta = mkEl("div", { class: "ttpt-eta" }, formatMins(r.etaSeconds) + " min");
-          right.appendChild(eta);
-          const sub = mkEl("div", { class: "ttpt-sub" }, formatKm(r.distanceMeters));
-          right.appendChild(sub);
+          right.appendChild(mkEl("div", { class: "ttpt-eta" }, formatMins(r.etaSeconds) + " min"));
+          right.appendChild(mkEl("div", { class: "ttpt-sub" }, formatKm(r.distanceMeters)));
+        } else if (r.status === "unresolved") {
+          right.appendChild(mkEl("div", { class: "ttpt-eta" }, "—"));
+          right.appendChild(mkEl("div", { class: "ttpt-sub" }, "UNRESOLVED"));
+        } else if (r.status === "needsConfig") {
+          right.appendChild(mkEl("div", { class: "ttpt-eta" }, "—"));
+          right.appendChild(mkEl("div", { class: "ttpt-sub" }, "NEEDS CONFIG"));
         } else if (r.status === "rateLimited") {
           right.appendChild(mkEl("div", { class: "ttpt-eta" }, "—"));
           right.appendChild(mkEl("div", { class: "ttpt-sub" }, "RATE LIMITED"));
@@ -441,22 +562,15 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
       });
     }
 
-    // Paused indicator
-    if (settings.paused) {
-      badges.appendChild(mkBadge("PAUSED", "muted"));
-    }
+    if (settings.paused) badges.appendChild(mkBadge("PAUSED", "muted"));
 
-    // Provider badge
-    badges.appendChild(mkBadge(String(settings.provider || "osrm").toUpperCase(), "muted"));
-
-    // Assemble
     body.appendChild(badges);
     body.appendChild(statusLine);
     body.appendChild(list);
 
-    // Footer hint (only if we have issues)
     const hint = mkEl("div", { class: "ttpt-hint" });
-    hint.appendChild(mkEl("div", null, "Tip: Under file://, network requests can be blocked by CORS. If so, use a CORS-friendly OSRM endpoint or a VizInt proxy (if available)."));
+    hint.appendChild(mkEl("div", null,
+      "Tip: If requests are BLOCKED under file://, use a CORS-friendly endpoint or a VizInt proxy (if available)."));
     foot.appendChild(hint);
 
     host.appendChild(styleTag());
@@ -466,7 +580,6 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
   }
 
   function styleTag() {
-    // Inline CSS, scoped by classes
     return mkEl("style", null, `
       .ttpt-root{font:13px/1.3 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;}
       .ttpt-header{display:flex;align-items:center;justify-content:space-between;padding:8px 8px 6px;}
@@ -477,7 +590,6 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
       .ttpt-body{padding:0 8px 6px;}
       .ttpt-badges{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
       .ttpt-badge{font-size:11px;border-radius:999px;padding:2px 8px;border:1px solid rgba(127,127,127,.35);opacity:.95}
-      .ttpt-ok{opacity:.95}
       .ttpt-warn{border-color:rgba(200,150,60,.6)}
       .ttpt-muted{opacity:.7}
       .ttpt-statusline{font-size:12px;opacity:.85;margin:4px 0 8px}
@@ -492,7 +604,7 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
       .ttpt-foot{padding:0 8px 8px}
       .ttpt-hint{font-size:11px;opacity:.7}
       .ttpt-modal-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-start;justify-content:center;padding:10px}
-      .ttpt-modal{max-width:520px;width:100%;background:rgba(20,20,20,.92);color:#fff;border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:12px}
+      .ttpt-modal{max-width:560px;width:100%;background:rgba(20,20,20,.92);color:#fff;border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:12px}
       .ttpt-modal h3{margin:0 0 8px;font-size:14px}
       .ttpt-form{display:flex;flex-direction:column;gap:10px}
       .ttpt-field{display:flex;flex-direction:column;gap:4px}
@@ -507,6 +619,7 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
       .ttpt-poi-editor{border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:8px;display:flex;flex-direction:column;gap:8px}
       .ttpt-poi-item{border:1px solid rgba(255,255,255,.10);border-radius:12px;padding:8px;display:flex;flex-direction:column;gap:8px}
       .ttpt-poi-actions{display:flex;gap:8px;justify-content:flex-end}
+      .ttpt-pill{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.18);font-size:11px;opacity:.85}
     `);
   }
 
@@ -534,8 +647,6 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
     if (s.paused) return;
 
     const refreshSeconds = clamp(s.refreshSeconds, 30, 3600);
-
-    // Backoff if rate limited
     const backoffFactor = st.backoffFactor || 1;
     const delayMs = Math.round(refreshSeconds * 1000 * backoffFactor);
 
@@ -552,7 +663,6 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
     const host = st.host;
     const s = getSettings(ctx);
 
-    // If paused, do nothing (manual refresh still allowed)
     if (meta && meta.reason !== "manual" && s.paused) return;
 
     st.inFlight = true;
@@ -561,109 +671,44 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
     try {
       const enabledPois = (s.pois || []).filter(p => p && p.enabled !== false);
       if (!enabledPois.length) {
-        // Nothing to do
-        st.inFlight = false;
         render(host, ctx);
-        scheduleNext(ctx, meta);
         return;
       }
 
-      // Determine origin
       const origin = await bestEffortGeo(ctx, s);
       if (!origin) {
-        // Configuration required
-        // Mark all enabled POIs as not-fetched error-ish so UI shows "NEEDS CONFIG"
         for (const p of enabledPois) {
-          s._cache.resultsByPoiId[p.id] = {
-            status: "error",
-            etaSeconds: NaN,
-            distanceMeters: NaN,
-            atMs: nowMs()
-          };
+          s._cache.resultsByPoiId[p.id] = { status: "needsConfig", etaSeconds: NaN, distanceMeters: NaN, atMs: nowMs() };
         }
         s._cache.lastUpdatedMs = nowMs();
         setSettings(ctx, s);
-        st.inFlight = false;
         render(host, ctx);
-        scheduleNext(ctx, meta);
         return;
       }
 
-      const baseUrl = (s.endpoints && s.endpoints.osrmBaseUrl) ? s.endpoints.osrmBaseUrl : "https://router.project-osrm.org";
+      const effProvider = resolveEffectiveProvider(s, ctx);
+      const hasTomTomKey = !!getTomTomKey(s, ctx);
 
-      // Fetch each POI (simple serial loop for v0.1.0; easy to parallelize later with throttling)
+      // Fetch each POI (serial; improves debugging and avoids bursty free-tier hits)
       for (const poi of enabledPois) {
-        const dest = poi.destination || {};
-        const hasLatLon = (dest.mode === "latlon" && isFinite(dest.lat) && isFinite(dest.lon));
-        if (!hasLatLon) {
-          s._cache.resultsByPoiId[poi.id] = {
-            status: "error",
-            etaSeconds: NaN,
-            distanceMeters: NaN,
-            atMs: nowMs()
-          };
+        const ll = getDestLatLon(poi);
+        if (!ll) {
+          s._cache.resultsByPoiId[poi.id] = { status: "unresolved", etaSeconds: NaN, distanceMeters: NaN, atMs: nowMs() };
           continue;
         }
 
-        const url = osrmRouteUrl(baseUrl, origin, { lat: Number(dest.lat), lon: Number(dest.lon) });
-
-        let resp;
-        try {
-          resp = await fetch(url, { method: "GET" });
-        } catch (e) {
-          const c = classifyFetchError(e);
-          s._cache.resultsByPoiId[poi.id] = {
-            status: c.kind,
-            etaSeconds: NaN,
-            distanceMeters: NaN,
-            atMs: nowMs()
-          };
+        // If effective provider is TomTom but key missing, mark needs config.
+        if (effProvider === "tomtom" && !hasTomTomKey) {
+          s._cache.resultsByPoiId[poi.id] = { status: "needsConfig", etaSeconds: NaN, distanceMeters: NaN, atMs: nowMs() };
           continue;
         }
 
-        if (resp.status === 429) {
-          // Backoff for next cycle
+        const r = await routeOne(s, ctx, origin, ll);
+        s._cache.resultsByPoiId[poi.id] = { ...r, atMs: nowMs() };
+
+        if (r.status === "rateLimited") {
+          // backoff next cycle
           st.backoffFactor = 2;
-          s._cache.resultsByPoiId[poi.id] = {
-            status: "rateLimited",
-            etaSeconds: NaN,
-            distanceMeters: NaN,
-            atMs: nowMs()
-          };
-          continue;
-        }
-
-        if (!resp.ok) {
-          const kind = (resp.status === 401 || resp.status === 403) ? "error" : "error";
-          s._cache.resultsByPoiId[poi.id] = {
-            status: kind,
-            etaSeconds: NaN,
-            distanceMeters: NaN,
-            atMs: nowMs()
-          };
-          continue;
-        }
-
-        let data;
-        try { data = await resp.json(); }
-        catch (_) { data = null; }
-
-        // OSRM success shape: { routes:[{duration,distance,...}], code:"Ok" }
-        const route = data && data.routes && data.routes[0];
-        if (route && isFinite(route.duration)) {
-          s._cache.resultsByPoiId[poi.id] = {
-            status: "ok",
-            etaSeconds: Number(route.duration),
-            distanceMeters: isFinite(route.distance) ? Number(route.distance) : NaN,
-            atMs: nowMs()
-          };
-        } else {
-          s._cache.resultsByPoiId[poi.id] = {
-            status: "error",
-            etaSeconds: NaN,
-            distanceMeters: NaN,
-            atMs: nowMs()
-          };
         }
       }
 
@@ -683,9 +728,7 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
     const host = st.host;
     const s = getSettings(ctx);
 
-    // Backdrop
     const backdrop = mkEl("div", { class: "ttpt-modal-backdrop" });
-    // Ensure positioning works even if host isn't positioned
     host.style.position = host.style.position || "relative";
 
     const modal = mkEl("div", { class: "ttpt-modal" });
@@ -693,27 +736,51 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
 
     const form = mkEl("div", { class: "ttpt-form" });
 
-    // Provider (v0.1.0: only OSRM is wired)
+    // Provider selection (advisory)
     const providerField = mkEl("div", { class: "ttpt-field" });
     providerField.appendChild(mkEl("label", null, "Provider"));
     const providerSel = mkEl("select", null, [
-      mkEl("option", { value: "osrm" }, "OSRM (keyless)"),
-      mkEl("option", { value: "custom" }, "Custom (OSRM-compatible URL)")
+      mkEl("option", { value: "osrm" }, "OSRM (keyless, best-effort)"),
+      mkEl("option", { value: "tomtom" }, "TomTom (requires key; traffic-aware)"),
+      mkEl("option", { value: "custom" }, "Custom (OSRM-compatible URL)"),
     ]);
-    providerSel.value = (s.provider === "custom") ? "custom" : "osrm";
+    providerSel.value = (s.provider === "tomtom") ? "tomtom" : ((s.provider === "custom") ? "custom" : "osrm");
     providerField.appendChild(providerSel);
-    providerField.appendChild(mkEl("div", { class: "ttpt-small" }, "v0.1.0 uses OSRM routing. Address geocoding is not included."));
+    providerField.appendChild(mkEl("div", { class: "ttpt-small" },
+      "Effective provider: TomTom is auto-selected when a TomTom API key is present (per-instance priority)."));
     form.appendChild(providerField);
 
-    // OSRM endpoint
-    const epField = mkEl("div", { class: "ttpt-field" });
-    epField.appendChild(mkEl("label", null, "OSRM base URL"));
-    const epInput = mkEl("input", { type: "text", value: (s.endpoints && s.endpoints.osrmBaseUrl) ? s.endpoints.osrmBaseUrl : "" });
-    epField.appendChild(epInput);
-    epField.appendChild(mkEl("div", { class: "ttpt-small" }, "Example: https://router.project-osrm.org (best-effort public)."));
-    form.appendChild(epField);
+    // TomTom API key
+    const keyField = mkEl("div", { class: "ttpt-field" });
+    keyField.appendChild(mkEl("label", null, "TomTom API key (stored in settings for now)"));
+    const keyInput = mkEl("input", { type: "password", value: String((s.auth && s.auth.apiKey && s.auth.apiKey.tomtom) || "") });
+    keyField.appendChild(keyInput);
+    keyField.appendChild(mkEl("div", { class: "ttpt-small" }, "If set, TomTom becomes default provider (priority rule)."));
+    form.appendChild(keyField);
 
-    // Refresh interval
+    // Endpoints
+    const epOsrm = mkEl("div", { class: "ttpt-field" });
+    epOsrm.appendChild(mkEl("label", null, "OSRM base URL"));
+    const osrmInput = mkEl("input", { type: "text", value: String((s.endpoints && s.endpoints.osrmBaseUrl) || "") });
+    epOsrm.appendChild(osrmInput);
+    epOsrm.appendChild(mkEl("div", { class: "ttpt-small" }, "Example: https://router.project-osrm.org (public, best-effort)."));
+    form.appendChild(epOsrm);
+
+    const epTom = mkEl("div", { class: "ttpt-field" });
+    epTom.appendChild(mkEl("label", null, "TomTom base URL"));
+    const tomInput = mkEl("input", { type: "text", value: String((s.endpoints && s.endpoints.tomtomBaseUrl) || "https://api.tomtom.com") });
+    epTom.appendChild(tomInput);
+    epTom.appendChild(mkEl("div", { class: "ttpt-small" }, "Default is https://api.tomtom.com"));
+    form.appendChild(epTom);
+
+    const epNom = mkEl("div", { class: "ttpt-field" });
+    epNom.appendChild(mkEl("label", null, "Nominatim URL (fallback geocoder when no key)"));
+    const nomInput = mkEl("input", { type: "text", value: String((s.endpoints && s.endpoints.nominatimUrl) || "https://nominatim.openstreetmap.org/search") });
+    epNom.appendChild(nomInput);
+    epNom.appendChild(mkEl("div", { class: "ttpt-small" }, "Public Nominatim is rate-limited (~1 req/sec)."));
+    form.appendChild(epNom);
+
+    // Refresh & display
     const row = mkEl("div", { class: "ttpt-row2" });
     const refreshField = mkEl("div", { class: "ttpt-field" });
     refreshField.appendChild(mkEl("label", null, "Refresh seconds (30..3600)"));
@@ -728,12 +795,12 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
     row.appendChild(maxItemsField);
     form.appendChild(row);
 
-    // Origin mode
+    // Origin
     const originField = mkEl("div", { class: "ttpt-field" });
     originField.appendChild(mkEl("label", null, "Origin mode"));
     const originSel = mkEl("select", null, [
       mkEl("option", { value: "currentLocation" }, "Current location (best effort)"),
-      mkEl("option", { value: "fixed" }, "Fixed lat/lon")
+      mkEl("option", { value: "fixed" }, "Fixed lat/lon"),
     ]);
     originSel.value = (s.origin && s.origin.mode === "fixed") ? "fixed" : "currentLocation";
     originField.appendChild(originSel);
@@ -744,17 +811,16 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
     originRow.appendChild(mkEl("div", { class: "ttpt-field" }, [mkEl("label", null, "Fixed lat"), latInput]));
     originRow.appendChild(mkEl("div", { class: "ttpt-field" }, [mkEl("label", null, "Fixed lon"), lonInput]));
     originField.appendChild(originRow);
+    form.appendChild(originField);
 
     const allowLocField = mkEl("div", { class: "ttpt-field" });
+    allowLocField.appendChild(mkEl("label", null, "Privacy"));
     const allowLoc = mkEl("select", null, [
       mkEl("option", { value: "true" }, "Allow location"),
-      mkEl("option", { value: "false" }, "Do not use location")
+      mkEl("option", { value: "false" }, "Do not use location"),
     ]);
     allowLoc.value = (s.privacy && s.privacy.allowLocation) ? "true" : "false";
-    allowLocField.appendChild(mkEl("label", null, "Privacy"));
     allowLocField.appendChild(allowLoc);
-
-    form.appendChild(originField);
     form.appendChild(allowLocField);
 
     // Sorting
@@ -763,13 +829,13 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
     const sortSel = mkEl("select", null, [
       mkEl("option", { value: "asEntered" }, "As entered"),
       mkEl("option", { value: "shortestETA" }, "Shortest ETA (if available)"),
-      mkEl("option", { value: "alpha" }, "Alphabetical")
+      mkEl("option", { value: "alpha" }, "Alphabetical"),
     ]);
     sortSel.value = (s.display && s.display.sort) ? s.display.sort : "asEntered";
     sortField.appendChild(sortSel);
     form.appendChild(sortField);
 
-    // POI editor
+    // POI editor (address-first)
     const poiWrap = mkEl("div", { class: "ttpt-poi-editor" });
     poiWrap.appendChild(mkEl("div", null, "POIs"));
     const poiList = mkEl("div", null);
@@ -788,7 +854,7 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
         const r1 = mkEl("div", { class: "ttpt-row2" });
 
         const nameF = mkEl("div", { class: "ttpt-field" });
-        nameF.appendChild(mkEl("label", null, "Name"));
+        nameF.appendChild(mkEl("label", null, "Display name"));
         const nameI = mkEl("input", { type: "text", value: String(poi.name || "") });
         nameF.appendChild(nameI);
 
@@ -796,7 +862,7 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
         enabledF.appendChild(mkEl("label", null, "Enabled"));
         const enabledSel = mkEl("select", null, [
           mkEl("option", { value: "true" }, "Yes"),
-          mkEl("option", { value: "false" }, "No")
+          mkEl("option", { value: "false" }, "No"),
         ]);
         enabledSel.value = (poi.enabled === false) ? "false" : "true";
         enabledF.appendChild(enabledSel);
@@ -804,22 +870,22 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
         r1.appendChild(nameF);
         r1.appendChild(enabledF);
 
-        const r2 = mkEl("div", { class: "ttpt-row2" });
+        const addrF = mkEl("div", { class: "ttpt-field" });
+        addrF.appendChild(mkEl("label", null, "Address / place name"));
+        const q0 = poi.destination ? (poi.destination.query || poi.destination.address || "") : "";
+        const addrI = mkEl("input", { type: "text", value: String(q0 || "") });
+        addrF.appendChild(addrI);
+        addrF.appendChild(mkEl("div", { class: "ttpt-small" }, "Examples: 1600 Pennsylvania Avenue | The White House | Masjid Alwadood"));
 
-        const latF = mkEl("div", { class: "ttpt-field" });
-        latF.appendChild(mkEl("label", null, "Dest lat"));
-        const dLat = mkEl("input", { type: "number", step: "any", value: (poi.destination && poi.destination.lat != null) ? String(poi.destination.lat) : "" });
-        latF.appendChild(dLat);
-
-        const lonF = mkEl("div", { class: "ttpt-field" });
-        lonF.appendChild(mkEl("label", null, "Dest lon"));
-        const dLon = mkEl("input", { type: "number", step: "any", value: (poi.destination && poi.destination.lon != null) ? String(poi.destination.lon) : "" });
-        lonF.appendChild(dLon);
-
-        r2.appendChild(latF);
-        r2.appendChild(lonF);
-
-        const small = mkEl("div", { class: "ttpt-small" }, "Address mode is stored but not geocoded in v0.1.0. Use lat/lon for now.");
+        const info = mkEl("div", { class: "ttpt-small" });
+        const ll = getDestLatLon(poi);
+        if (ll) {
+          info.appendChild(mkEl("span", { class: "ttpt-pill" }, "Resolved"));
+          info.appendChild(document.createTextNode(" "));
+          info.appendChild(mkEl("span", { class: "ttpt-pill" }, ll.lat.toFixed(5) + "," + ll.lon.toFixed(5)));
+        } else {
+          info.appendChild(mkEl("span", { class: "ttpt-pill" }, "Unresolved"));
+        }
 
         const actions = mkEl("div", { class: "ttpt-poi-actions" });
         const btnUp = mkEl("button", { class: "ttpt-btn2", type: "button", onclick: () => {
@@ -838,6 +904,13 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
           renderPoiEditor(listSettings);
         }}, "↓");
 
+        const btnClear = mkEl("button", { class: "ttpt-btn2", type: "button", onclick: () => {
+          poi.destination = poi.destination || {};
+          poi.destination.lat = null;
+          poi.destination.lon = null;
+          renderPoiEditor(listSettings);
+        }}, "Clear coords");
+
         const btnDel = mkEl("button", { class: "ttpt-btn2", type: "button", onclick: () => {
           listSettings.pois.splice(idx, 1);
           renderPoiEditor(listSettings);
@@ -845,25 +918,24 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
 
         actions.appendChild(btnUp);
         actions.appendChild(btnDown);
+        actions.appendChild(btnClear);
         actions.appendChild(btnDel);
 
-        // Wire edits back into listSettings in-place
+        // Wire edits
         nameI.addEventListener("input", () => { poi.name = nameI.value; });
         enabledSel.addEventListener("change", () => { poi.enabled = (enabledSel.value === "true"); });
-        dLat.addEventListener("input", () => {
-          poi.destination = poi.destination || { mode: "latlon" };
-          poi.destination.mode = "latlon";
-          poi.destination.lat = (dLat.value === "") ? null : Number(dLat.value);
-        });
-        dLon.addEventListener("input", () => {
-          poi.destination = poi.destination || { mode: "latlon" };
-          poi.destination.mode = "latlon";
-          poi.destination.lon = (dLon.value === "") ? null : Number(dLon.value);
+        addrI.addEventListener("input", () => {
+          poi.destination = poi.destination || {};
+          poi.destination.mode = "address";
+          poi.destination.query = addrI.value;
+          // Invalidate coords when address changes (will re-resolve on save)
+          poi.destination.lat = null;
+          poi.destination.lon = null;
         });
 
         item.appendChild(r1);
-        item.appendChild(r2);
-        item.appendChild(small);
+        item.appendChild(addrF);
+        item.appendChild(info);
         item.appendChild(actions);
         poiList.appendChild(item);
       });
@@ -876,8 +948,8 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
       s.pois.push({
         id: "poi-" + Math.random().toString(16).slice(2) + "-" + nowMs().toString(16),
         name: "New POI",
-        destination: { mode: "latlon", lat: null, lon: null },
-        enabled: true
+        destination: { mode: "address", query: "", lat: null, lon: null },
+        enabled: true,
       });
       renderPoiEditor(s);
     }}, "+ Add POI");
@@ -893,7 +965,6 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
     const btnReset = mkEl("button", { class: "ttpt-btn2", type: "button", onclick: () => {
       if (ctx.resetSettings) ctx.resetSettings();
       closeModal(ctx);
-      // render + refresh after reset
       const st2 = STATE.get(ctx);
       if (st2) {
         render(st2.host, ctx);
@@ -901,11 +972,24 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
       }
     }}, "Reset");
 
-    const btnSave = mkEl("button", { class: "ttpt-btn2", type: "button", onclick: () => {
-      // Apply form values -> s
+    const btnSave = mkEl("button", { class: "ttpt-btn2", type: "button" }, "Save");
+
+    async function doSave() {
+      btnSave.disabled = true;
+      const oldLabel = btnSave.textContent;
+      btnSave.textContent = "Saving…";
+
+      // Apply form values
       s.provider = providerSel.value;
+
       s.endpoints = s.endpoints || {};
-      s.endpoints.osrmBaseUrl = String(epInput.value || "").trim() || "https://router.project-osrm.org";
+      s.endpoints.osrmBaseUrl = String(osrmInput.value || "").trim() || "https://router.project-osrm.org";
+      s.endpoints.tomtomBaseUrl = String(tomInput.value || "").trim() || "https://api.tomtom.com";
+      s.endpoints.nominatimUrl = String(nomInput.value || "").trim() || "https://nominatim.openstreetmap.org/search";
+
+      s.auth = s.auth || {};
+      s.auth.apiKey = s.auth.apiKey || {};
+      s.auth.apiKey.tomtom = String(keyInput.value || "").trim();
 
       s.refreshSeconds = clamp(refreshInput.value, 30, 3600);
       s.display = s.display || {};
@@ -925,6 +1009,45 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
       s._cache = s._cache || { lastUpdatedMs: 0, resultsByPoiId: {} };
       s._cache.resultsByPoiId = s._cache.resultsByPoiId || {};
 
+      // Auto-resolve POIs (address -> lat/lon)
+      const keyPresent = !!getTomTomKey(s, ctx);
+      let lastNominatimAt = 0
+      const pois = s.pois || [];
+      for (const poi of pois) {
+        if (poi && poi.enabled === false) continue;
+        const dest = poi && poi.destination ? poi.destination : null;
+        if (!dest) continue;
+        const q = String(dest.query || dest.address || "").trim();
+        const hasLL = getDestLatLon(poi);
+        if (hasLL) continue;
+        if (!q) continue;
+
+        // Respect public Nominatim rate limits if we are using it
+        if (!keyPresent) {
+          const now = nowMs();
+          const wait = (lastNominatimAt + 1100) - now;
+          if (wait > 0) await sleep(wait);
+        }
+
+        const r = await geocodeOne(s, ctx, q);
+        if (r.ok) {
+          dest.mode = "latlon";
+          dest.lat = r.lat;
+          dest.lon = r.lon;
+          dest._geocoder = r.provider;
+          dest._resolvedAtMs = nowMs();
+        } else {
+          // keep unresolved
+          dest.mode = "address";
+          dest.lat = null;
+          dest.lon = null;
+          dest._geocoder = r.provider || "none";
+          dest._resolvedAtMs = 0;
+        }
+        if (!keyPresent) lastNominatimAt = nowMs();
+
+      }
+
       setSettings(ctx, s);
       closeModal(ctx);
 
@@ -933,7 +1056,12 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
         render(st2.host, ctx);
         refreshNow(ctx, { reason: "settingsSaved" });
       }
-    }}, "Save");
+
+      btnSave.textContent = oldLabel;
+      btnSave.disabled = false;
+    }
+
+    btnSave.addEventListener("click", () => { void doSave(); });
 
     actions.appendChild(btnCancel);
     actions.appendChild(btnReset);
@@ -941,15 +1069,12 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
 
     modal.appendChild(form);
     modal.appendChild(actions);
-
     backdrop.appendChild(modal);
 
-    // Close on backdrop click
     backdrop.addEventListener("click", (e) => {
       if (e.target === backdrop) closeModal(ctx);
     });
 
-    // Store and attach
     st.modal = backdrop;
     host.appendChild(backdrop);
   }
@@ -962,20 +1087,17 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
   }
 
   function mount(host, ctx) {
-    // Initialize runtime state
     const st = {
-      host: host,
+      host,
       timer: null,
       inFlight: false,
       backoffFactor: 1,
       modal: null,
-      settings: null
+      settings: null,
     };
     STATE.set(ctx, st);
 
     render(host, ctx);
-
-    // Kick first refresh (best-effort)
     refreshNow(ctx, { reason: "initial" });
     scheduleNext(ctx, { reason: "initial" });
   }
@@ -992,16 +1114,13 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
     if (host) host.innerHTML = "";
   }
 
-  // Optional Portal-driven settings hook:
-  // If Portal calls this, we open our in-gadget settings overlay.
-  function onSettingsRequested(ctx /*, shell */) {
+  function onSettingsRequested(ctx) {
     openSettings(ctx);
   }
 
-  function onInfoClick(ctx /*, shell */) {
-    // Minimal "About" log for now (keeps it offline-safe)
+  function onInfoClick(ctx) {
     try {
-      console.log("[Time-to-POI]", manifest._ver, "OSRM-first; keyless; per-instance settings.");
+      console.log("[Time-to-POI]", manifest._ver, manifest.verBlurb);
     } catch (_) {}
   }
 
@@ -1011,6 +1130,6 @@ async function geocodeNominatimOne(query, nominatimUrl, timeoutMs) {
     mount,
     unmount,
     onSettingsRequested,
-    onInfoClick
+    onInfoClick,
   };
 })();
