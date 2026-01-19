@@ -1,44 +1,61 @@
 /*
- * $VER: Masjid Iqama Countdown Gadget (RSS) 1.0.0
+ * $VER: Masjid Iqama Countdown Gadget (RSS) 1.1.0
+ *
  * $DESCRIPTION:
- * A gadget that displays a countdown to the next Iqama time.
+ * Multi-instance gadget that displays ALL Adhan + Iqama times (Iqama bold),
+ * and shows a countdown to the NEXT Iqama with a remaining-time progress bar
+ * rendered BETWEEN the previous and next Iqama rows.
+ *
  * $HISTORY:
- * 2026/01/16	1.0.0	Initial public release.
- * 
+ * 2026/01/16  1.0.0  Initial public release (deterministic RSS parsing + bounded typo correction).
+ * 2026/01/18  1.1.0  Spec v0.2.0 UI + semantics:
+ *                    - Full prayer table (Adhan + Iqama; Iqama bold)
+ *                    - Interval progress bar inserted BETWEEN prev/next rows
+ *                    - Progress meaning = time remaining (0% means you’re late)
+ *                    - Header: Iqama | Masjid name | إقامة + ⟳
+ *                    - Footer: minutes-only remaining + last updated (grey)
+ *                    - Countdown updates every 10s; under 10m switches to MM:SS @ 1s
+ *                    - Settings: gear toggles in-gadget panel; Save/Reset/Close hide it
+ *
  * Notes:
- * - v1.2.2 registration doctrine: window.GADGETS[manifest._class]
+ * - Registration doctrine: window.GADGETS[manifest._class] = api
  * - No ES modules. Plain IIFE.
- * - Per-instance settings only via ctx.getSettings / ctx.setSettings / ctx.resetSettings 
- * - Chronus 1.0+ compatibility via ctx.libs.Chronus
- * - Deterministic RSS parsing + bounded correction rule (03:15 -> 15:15 only under strict invariant)
-*/
+ * - Per-instance settings only via ctx.getSettings / ctx.setSettings / ctx.resetSettings
+ */
 
 (function () {
   "use strict";
 
-  const manifest = {
+  // ----------------------------
+  // Manifest
+  // ----------------------------
+  var manifest = {
     _api: "1.0",
     _class: "iqama-countdown",
     _type: "multi",
     _id: "default",
-    _ver: "0.1.0",
-    label: "Masjid I",
+    _ver: "1.1.0",
+    label: "Masjid Iqama",
     iconEmoji: "🕌",
     supportsSettings: true,
-    capabilities: ["network", "chronus"],
-    description: "Shows minutes until the next Iqama (إقامة) from a Masjid RSS feed (deterministic parsing).",
-    verBlurb: "Initial release: deterministic RSS parsing + Chronus 1s countdown + bounded typo correction."
+    capabilities: ["settings", "network"],
+    description: "Shows Adhan + Iqama times and countdown to next Iqama (إقامة) from RSS (deterministic parsing)."
   };
 
-  const DEFAULTS = {
-    masjid: { name: "Masjid (configure in ⚙️)", locationHint: "" },
+  // ----------------------------
+  // Defaults
+  // ----------------------------
+  var DEFAULTS = {
+    masjid: { name: "Masjid", locationHint: "" },
     feed: { url: "https://masjidalwadood.com/api/rss.php", mode: "rss", parseStrategy: "auto" },
     refreshSeconds: 60,
-    display: { showArabicLabel: true, showNextPrayerName: true, largeTypography: true },
-    behavior: { countdownMode: "toIqamaOnly", negativeTimeHandling: "clampToZero" },
+    display: { showArabicLabel: true, largeTypography: true },
     debug: { showLastFetch: false, showParseDetails: false }
   };
 
+  // ----------------------------
+  // Utilities
+  // ----------------------------
   function clamp(n, lo, hi) {
     n = Number(n);
     if (!isFinite(n)) return lo;
@@ -50,134 +67,46 @@
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+      .replace(/\"/g, "&quot;");
   }
 
   function deepMerge(a, b) {
-    // small, safe deep merge for plain objects
-    const out = Array.isArray(a) ? a.slice() : Object.assign({}, a || {});
+    var out = Array.isArray(a) ? a.slice() : Object.assign({}, a || {});
     if (!b || typeof b !== "object") return out;
-    for (const k of Object.keys(b)) {
-      const bv = b[k];
-      const av = out[k];
+    Object.keys(b).forEach(function (k) {
+      var bv = b[k];
+      var av = out[k];
       if (bv && typeof bv === "object" && !Array.isArray(bv)) out[k] = deepMerge(av && typeof av === "object" ? av : {}, bv);
       else out[k] = bv;
-    }
+    });
     return out;
   }
 
   function getAllSettings(ctx) {
     try {
-      // ctx.getSettings(key?, def?) exists per spec; calling with no args returns whole object in many implementations.
-      const current = ctx.getSettings ? ctx.getSettings() : null;
-      return deepMerge(DEFAULTS, current || {});
-    } catch (_) {
+      var current = (ctx && typeof ctx.getSettings === "function" ? (ctx.getSettings() || {}) : {});
+      return deepMerge(DEFAULTS, current);
+    } catch (e) {
       return deepMerge(DEFAULTS, {});
     }
   }
 
   function setSettings(ctx, patch) {
     if (!ctx || typeof ctx.setSettings !== "function") return;
-    try {
-      ctx.setSettings(patch);
-    } catch (_) {}
+    try { ctx.setSettings(patch); } catch (e) {}
   }
 
   function resetSettings(ctx) {
     if (!ctx || typeof ctx.resetSettings !== "function") return;
-    try {
-      ctx.resetSettings();
-    } catch (_) {}
+    try { ctx.resetSettings(); } catch (e) {}
   }
 
-  function nowChronus(ctx) {
-    const Chronus = ctx && ctx.libs && ctx.libs.Chronus;
-    if (Chronus && typeof Chronus.now === "function") return Chronus.now();
-    return null;
-  }
-
-  function nowDate(ctx) {
-    const z = nowChronus(ctx);
-    // Chronus "now" likely has .toDate(); if not, fall back
-    if (z && typeof z.toDate === "function") return z.toDate();
+  function nowDate() {
     return new Date();
   }
 
-  function fmtHMS(ms) {
-    const s = Math.max(0, Math.floor(ms / 1000));
-    const H = Math.floor(s / 3600);
-    const M = Math.floor((s % 3600) / 60);
-    const S = s % 60;
-    return String(H).padStart(2, "0") + ":" + String(M).padStart(2, "0") + ":" + String(S).padStart(2, "0");
-  }
-
-  function minutesUntil(target, now) {
-    const diffMs = target.getTime() - now.getTime();
-    return Math.ceil(diffMs / 60000);
-  }
-
-  function fetchWithTimeout(url, timeoutMs) {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), timeoutMs);
-    return fetch(url, { signal: ctrl.signal, cache: "no-store" })
-      .then((r) => {
-        clearTimeout(t);
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        return r.text();
-      })
-      .catch((e) => {
-        clearTimeout(t);
-        throw e;
-      });
-  }
-
-  // ---- RSS parsing (deterministic) ----
-
-  function parseRss(xmlText) {
-    const doc = new DOMParser().parseFromString(xmlText, "text/xml");
-    const rss = doc.querySelector("rss");
-    if (!rss) throw new Error("Not RSS XML");
-    const item = doc.querySelector("channel > item");
-    if (!item) throw new Error("No <item> found");
-
-    const title = (item.querySelector("title") && item.querySelector("title").textContent) || "";
-    const descNode = item.querySelector("description");
-    const description = (descNode && descNode.textContent) || "";
-
-    const dateMatch = String(title).match(/(\d{4}-\d{2}-\d{2})/);
-    if (!dateMatch) throw new Error("No YYYY-MM-DD date found in item title");
-    const ymd = dateMatch[1];
-
-    // Normalize description text (keep HTML-ish content as string; regex is strict but whitespace-tolerant)
-    const text = String(description)
-      .replace(/\r/g, "")
-      .replace(/\u00a0/g, " ")
-      .replace(/[ \t]+/g, " ")
-      .replace(/\n+/g, "\n");
-
-    // Strict prayer extraction: <strong>Name:</strong> Adhan HH:MM:SS, Iqama HH:MM:SS
-    const prayerRe =
-      /<strong>\s*(Fajar|Dhuhr|Asr|Maghrib|Isha)\s*:\s*<\/strong>\s*Adhan\s*([0-2]\d:[0-5]\d:[0-5]\d)\s*,\s*Iqama\s*([0-2]\d:[0-5]\d:[0-5]\d)/gi;
-
-    const prayers = [];
-    let m;
-    while ((m = prayerRe.exec(text))) {
-      prayers.push({
-        name: m[1],
-        adhan: m[2],
-        iqama: m[3]
-      });
-    }
-
-    if (!prayers.length) {
-      throw new Error("No prayer blocks found in RSS description (unsupported format)");
-    }
-
-    return { ymd, prayers, rawDescription: description, rawTitle: title };
-  }
-
   function parseHMS(hms) {
-    const m = String(hms).match(/^([0-2]\d):([0-5]\d):([0-5]\d)$/);
+    var m = String(hms).match(/^([0-2]\d):([0-5]\d):([0-5]\d)$/);
     if (!m) return null;
     return { h: Number(m[1]), mi: Number(m[2]), s: Number(m[3]) };
   }
@@ -186,112 +115,313 @@
     return t.h * 3600 + t.mi * 60 + t.s;
   }
 
-  function buildLocalDate(ymd, hmsObj) {
-    // Interpret as user-local time (per Addendum default)
-    const parts = String(ymd).split("-");
-    const y = Number(parts[0]),
-      mo = Number(parts[1]),
-      d = Number(parts[2]);
-    return new Date(y, mo - 1, d, hmsObj.h, hmsObj.mi, hmsObj.s, 0);
+  function buildLocalDate(ymd, hmsObj, dayOffset) {
+    var parts = String(ymd).split("-");
+    var y = Number(parts[0]), mo = Number(parts[1]), d = Number(parts[2]);
+    var dt = new Date(y, mo - 1, d, hmsObj.h, hmsObj.mi, hmsObj.s, 0);
+    if (dayOffset) dt.setDate(dt.getDate() + dayOffset);
+    return dt;
   }
 
+  function fmtHHMM(ms) {
+    var s = Math.max(0, Math.floor(ms / 1000));
+    var H = Math.floor(s / 3600);
+    var M = Math.floor((s % 3600) / 60);
+    return String(H).padStart(2, "0") + ":" + String(M).padStart(2, "0");
+  }
+
+  function fmtMMSS(ms) {
+    var s = Math.max(0, Math.floor(ms / 1000));
+    var M = Math.floor(s / 60);
+    var S = s % 60;
+    return String(M).padStart(2, "0") + ":" + String(S).padStart(2, "0");
+  }
+
+  function minutesRemaining(ms) {
+    return Math.max(0, Math.ceil(ms / 60000));
+  }
+
+  // ----------------------------
+  // Fetch
+  // ----------------------------
+  function fetchWithTimeout(url, timeoutMs) {
+    var ctrl = new AbortController();
+    var t = setTimeout(function () { try { ctrl.abort(); } catch (e) {} }, timeoutMs);
+    return fetch(url, { signal: ctrl.signal, cache: "no-store" })
+      .then(function (r) {
+        clearTimeout(t);
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.text();
+      })
+      .catch(function (e) {
+        clearTimeout(t);
+        throw e;
+      });
+  }
+
+  // ----------------------------
+  // RSS parsing (deterministic)
+  // ----------------------------
+  function parseRss(xmlText) {
+    var doc = new DOMParser().parseFromString(xmlText, "text/xml");
+    var item = doc.querySelector("channel > item");
+    if (!item) throw new Error("No <item> found");
+
+    var title = (item.querySelector("title") && item.querySelector("title").textContent) || "";
+    var descNode = item.querySelector("description");
+    var description = (descNode && descNode.textContent) || "";
+
+    var dateMatch = String(title).match(/(\d{4}-\d{2}-\d{2})/);
+    if (!dateMatch) throw new Error("No YYYY-MM-DD date found in item title");
+    var ymd = dateMatch[1];
+
+    // deterministic extraction of Adhan/Iqama from description CDATA
+    var text = String(description);
+    var prayerRe = /<strong>\s*(Fajar|Dhuhr|Asr|Maghrib|Isha)\s*:\s*<\/strong>\s*Adhan\s*([0-2]\d:[0-5]\d:[0-5]\d)\s*,\s*Iqama\s*([0-2]\d:[0-5]\d:[0-5]\d)/gi;
+
+    var prayers = [];
+    var m;
+    while ((m = prayerRe.exec(text))) {
+      prayers.push({ name: m[1], adhan: m[2], iqama: m[3] });
+    }
+    if (!prayers.length) throw new Error("No prayer blocks found in RSS description (unsupported format)");
+
+    return { ymd: ymd, prayers: prayers, rawTitle: title };
+  }
+
+  // Bounded correction rule (deterministic): if Iqama < Adhan and looks like AM/PM typo, add 12h.
   function applyBoundedCorrection(prayerName, adhanObj, iqamaObj) {
-    // Strict correction rule:
-    // If (Iqama < Adhan) AND (Iqama < 12:00:00) AND (Adhan >= 12:00:00)
-    // then add 12h to iqama hour (e.g. 03:15 -> 15:15).
-    const adhanSec = hmsToSeconds(adhanObj);
-    const iqamaSec = hmsToSeconds(iqamaObj);
+    var adhanSec = hmsToSeconds(adhanObj);
+    var iqamaSec = hmsToSeconds(iqamaObj);
 
     if (iqamaSec < adhanSec && iqamaSec < 12 * 3600 && adhanSec >= 12 * 3600) {
-      const corrected = { h: iqamaObj.h + 12, mi: iqamaObj.mi, s: iqamaObj.s };
-      if (corrected.h >= 24) return { corrected: null, note: "Correction overflow (ignored)", didCorrect: false };
-      return {
-        corrected,
-        note: prayerName + " Iqama corrected (Iqama < Adhan invariant)",
-        didCorrect: true,
-        from: iqamaObj,
-        to: corrected
-      };
+      var corrected = { h: iqamaObj.h + 12, mi: iqamaObj.mi, s: iqamaObj.s };
+      if (corrected.h >= 24) return { didCorrect: false };
+      return { didCorrect: true, from: iqamaObj, to: corrected, note: prayerName + " Iqama corrected (Iqama < Adhan invariant)" };
     }
-    return { corrected: null, note: "", didCorrect: false };
+    return { didCorrect: false };
   }
 
-  function buildScheduleFromRss(parsed) {
-    const schedule = [];
-    const corrections = [];
+  function buildSchedule(parsed) {
+    var rows = [];
+    var corrections = [];
 
-    for (const p of parsed.prayers) {
-      const adhanObj = parseHMS(p.adhan);
-      const iqamaObj = parseHMS(p.iqama);
+    for (var i = 0; i < parsed.prayers.length; i++) {
+      var p = parsed.prayers[i];
+      var adhanObj = parseHMS(p.adhan);
+      var iqamaObj = parseHMS(p.iqama);
       if (!adhanObj || !iqamaObj) continue;
 
-      const corr = applyBoundedCorrection(p.name, adhanObj, iqamaObj);
-      const iqamaFinal = corr.didCorrect ? corr.to : iqamaObj;
+      var corr = applyBoundedCorrection(p.name, adhanObj, iqamaObj);
+      var iqamaFinal = corr.didCorrect ? corr.to : iqamaObj;
 
       if (corr.didCorrect) {
-        corrections.push({
-          prayer: p.name,
-          from: p.iqama,
-          to:
-            String(iqamaFinal.h).padStart(2, "0") +
-            ":" +
-            String(iqamaFinal.mi).padStart(2, "0") +
-            ":" +
-            String(iqamaFinal.s).padStart(2, "0"),
-          note: corr.note
-        });
+        var toStr = String(iqamaFinal.h).padStart(2, "0") + ":" + String(iqamaFinal.mi).padStart(2, "0") + ":" + String(iqamaFinal.s).padStart(2, "0");
+        corrections.push({ prayer: p.name, from: p.iqama, to: toStr, note: corr.note });
+        p.iqama = toStr;
       }
 
-      const iqamaDate = buildLocalDate(parsed.ymd, iqamaFinal);
-      schedule.push({
+      rows.push({
         name: p.name,
-        iqamaDate
+        adhanStr: p.adhan,
+        iqamaStr: p.iqama,
+        adhanDate: buildLocalDate(parsed.ymd, adhanObj, 0),
+        iqamaDate: buildLocalDate(parsed.ymd, iqamaFinal, 0)
       });
     }
 
-    // Sort by time
-    schedule.sort((a, b) => a.iqamaDate.getTime() - b.iqamaDate.getTime());
-    return { schedule, corrections };
+    rows.sort(function (a, b) { return a.iqamaDate.getTime() - b.iqamaDate.getTime(); });
+    return { rows: rows, corrections: corrections };
   }
 
-  function pickNextIqama(schedule, now) {
-    for (const entry of schedule) {
-      if (entry.iqamaDate.getTime() > now.getTime()) return entry;
+  function computeInterval(state, now) {
+    var rows = state.rows || [];
+    if (!rows.length) return null;
+
+    var nextIdx = -1;
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].iqamaDate.getTime() > now.getTime()) { nextIdx = i; break; }
     }
-    return null;
+
+    // If none left today, target "tomorrow Fajr" using today's Fajr time-of-day (RSS limitation acknowledged).
+    if (nextIdx === -1) {
+      var fajrIdx = -1;
+      var ishaIdx = -1;
+      for (var j = 0; j < rows.length; j++) {
+        var nm = String(rows[j].name).toLowerCase();
+        if (nm.indexOf("fajar") !== -1 || nm.indexOf("fajr") !== -1) fajrIdx = j;
+        if (nm === "isha") ishaIdx = j;
+      }
+      var prev = (ishaIdx >= 0 ? rows[ishaIdx] : rows[rows.length - 1]);
+      var fajr = (fajrIdx >= 0 ? rows[fajrIdx] : rows[0]);
+
+      var fajrHMS = parseHMS(fajr.iqamaStr);
+      if (!fajrHMS) return null;
+      var nextDate = buildLocalDate(state.ymd, fajrHMS, 1);
+
+      return {
+        prev: prev,
+        next: Object.assign({}, fajr, { iqamaDate: nextDate, __isTomorrowFajrAssumption: true }),
+        prevName: prev.name,
+        nextName: fajr.name,
+        isTomorrowAssumption: true
+      };
+    }
+
+    return {
+      prev: (nextIdx > 0 ? rows[nextIdx - 1] : null),
+      next: rows[nextIdx],
+      prevName: (nextIdx > 0 ? rows[nextIdx - 1].name : null),
+      nextName: rows[nextIdx].name,
+      isTomorrowAssumption: false
+    };
   }
 
-  // ---- UI ----
-
+  // ----------------------------
+  // UI
+  // ----------------------------
   function ensureStyles(host) {
-    // Per-instance style tag inside host (no global IDs)
-    const style = document.createElement("style");
-    style.textContent = `
-      .miq-wrap{height:100%;display:flex;flex-direction:column;gap:6px;padding:10px;box-sizing:border-box;}
-      .miq-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}
-      .miq-name{font-weight:700;line-height:1.1}
-      .miq-hint{opacity:.75;font-size:12px;margin-top:2px}
-      .miq-main{display:flex;flex-direction:column;gap:4px;margin-top:6px}
-      .miq-line1{font-weight:700}
-      .miq-big{font-size:28px}
-      .miq-med{font-size:20px}
-      .miq-sub{opacity:.85;font-size:12px}
-      .miq-status{margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;opacity:.85}
-      .miq-pill{padding:2px 6px;border-radius:999px;border:1px solid rgba(255,255,255,.18);opacity:.9}
-      .miq-row{display:flex;gap:8px;align-items:center}
-      .miq-btn{cursor:pointer;border-radius:8px;padding:6px 10px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:inherit}
-      .miq-btn:active{transform:translateY(1px)}
-      .miq-muted{opacity:.7}
-      .miq-err{opacity:1}
-      .miq-err strong{color:inherit}
-      input.miq-in{width:100%;box-sizing:border-box;padding:8px;border-radius:8px;border:1px solid rgba(0,0,0,.2)}
-      .miq-form label{font-size:12px;opacity:.85}
-      .miq-form{display:flex;flex-direction:column;gap:10px;padding:10px}
-      .miq-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-      .miq-actions{display:flex;justify-content:flex-end;gap:8px}
-      .miq-note{font-size:12px;opacity:.8;line-height:1.25}
-      .miq-kv{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;font-size:11px;opacity:.85}
-    `;
+    if (host.__miq_hasStyles) return;
+    host.__miq_hasStyles = true;
+
+    var style = document.createElement("style");
+
+style.textContent = `
+.miq-root{
+  height:100%;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  padding:10px;
+  box-sizing:border-box;
+}
+
+.miq-header{
+  display:grid;
+  grid-template-columns:auto 1fr auto auto;
+  align-items:center;
+  gap:10px;
+}
+
+.miq-hl,.miq-hc,.miq-hr{font-weight:800}
+.miq-hc{
+  text-align:center;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.miq-refresh{
+  border:1px solid rgba(255,255,255,.18);
+  background:rgba(255,255,255,.06);
+  border-radius:8px;
+  padding:4px 8px;
+  cursor:pointer;
+}
+.miq-refresh:active{transform:translateY(1px)}
+
+.miq-table{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  margin-top:2px;
+}
+
+.miq-row{
+  display:grid;
+  grid-template-columns: 90px 90px 90px;
+  align-items:baseline;
+  gap:12px;
+}
+
+.miq-head{
+  font-weight:800;
+  opacity:.85;
+}
+
+.miq-head > div{
+  text-align:center;
+}
+
+
+.miq-row > div{
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.miq-pr{opacity:.92;font-weight:700;text-align:left;}
+.miq-ad{opacity:.85;text-align:center;}
+.miq-iq{opacity:1;text-align:center;}
+.miq-iq strong{font-weight:900}
+
+.miq-next{
+  border-radius:10px;
+  padding:4px 6px;
+  background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.12);
+}
+
+.miq-interval{margin:2px 0}
+
+.miq-barLine{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+
+.miq-bar{
+  position:relative;
+  flex:1;
+  height:22px;
+  border-radius:12px;
+  overflow:hidden;
+  border:1px solid rgba(255,255,255,.16);
+  background:rgba(0,0,0,.10);
+}
+
+.miq-barFill{
+  position:absolute;
+  top:0;
+  bottom:0;
+  right:0;           /* reverse fill direction */
+  width:0%;
+  background:linear-gradient(90deg,#4da3ff,#2f80ed);
+}
+
+.miq-bar.miq-urgent .miq-barFill{
+  background:linear-gradient(90deg,#ff6b6b,#d63031);
+}
+
+.miq-barLabel{
+  position:absolute;
+  top:50%;
+  transform:translateY(-50%);
+  padding:0 10px;
+  font-size:12px;
+  font-weight:800;
+  white-space:nowrap;
+  font-variant-numeric:tabular-nums;
+  pointer-events:none;
+  color:rgba(255,255,255,.95);
+  text-shadow:0 1px 0 rgba(0,0,0,.25);
+}
+
+.miq-barPct{
+  font-size:12px;
+  opacity:.85;
+  white-space:nowrap;
+}
+
+.miq-foot{
+  margin-top:auto;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  font-size:12px;
+  opacity:.65;
+}
+`;
+
     host.appendChild(style);
   }
 
@@ -299,540 +429,535 @@
     host.innerHTML = "";
     ensureStyles(host);
 
-    const wrap = document.createElement("div");
-    wrap.className = "miq-wrap";
+    var root = document.createElement("div");
+    root.className = "miq-root";
 
-    const top = document.createElement("div");
-    top.className = "miq-top";
+    var header = document.createElement("div");
+    header.className = "miq-header";
 
-    const titleBox = document.createElement("div");
-    const nameEl = document.createElement("div");
-    nameEl.className = "miq-name";
-    nameEl.textContent = "Masjid";
-    const hintEl = document.createElement("div");
-    hintEl.className = "miq-hint";
-    hintEl.textContent = "";
+    var hl = document.createElement("div");
+    hl.className = "miq-hl";
+    hl.textContent = "Iqama";
 
-    titleBox.appendChild(nameEl);
-    titleBox.appendChild(hintEl);
+    var hc = document.createElement("div");
+    hc.className = "miq-hc";
+    hc.textContent = "Masjid";
 
-    const btnRow = document.createElement("div");
-    btnRow.className = "miq-row";
+    var hr = document.createElement("div");
+    hr.className = "miq-hr";
+    hr.textContent = "إقامة";
 
-    const refreshBtn = document.createElement("button");
+    var refreshBtn = document.createElement("button");
+    refreshBtn.className = "miq-refresh";
     refreshBtn.type = "button";
-    refreshBtn.className = "miq-btn";
     refreshBtn.textContent = "⟳";
-    refreshBtn.title = "Refresh now";
+    refreshBtn.title = "Refresh RSS now";
 
-    btnRow.appendChild(refreshBtn);
+    header.appendChild(hl);
+    header.appendChild(hc);
+    header.appendChild(hr);
+    header.appendChild(refreshBtn);
 
-    top.appendChild(titleBox);
-    top.appendChild(btnRow);
+    var settings = document.createElement("div");
+    settings.className = "miq-settings";
 
-    const main = document.createElement("div");
-    main.className = "miq-main";
+    var table = document.createElement("div");
+    table.className = "miq-table";
 
-    const line1 = document.createElement("div");
-    line1.className = "miq-line1 miq-med";
-    line1.textContent = "⏱ —";
+    var err = document.createElement("div");
+    err.className = "miq-err";
+    err.style.display = "none";
 
-    const sub = document.createElement("div");
-    sub.className = "miq-sub";
-    sub.textContent = "Time until Iqama (إقامة). Not Adhan.";
+    var debug = document.createElement("div");
+    debug.className = "miq-debug";
+    debug.style.display = "none";
 
-    const debugBox = document.createElement("div");
-    debugBox.className = "miq-kv";
-    debugBox.style.display = "none";
+    var foot = document.createElement("div");
+    foot.className = "miq-foot";
 
-    main.appendChild(line1);
-    main.appendChild(sub);
-    main.appendChild(debugBox);
+    var footL = document.createElement("div");
+    var footR = document.createElement("div");
+    foot.appendChild(footL);
+    foot.appendChild(footR);
 
-    const status = document.createElement("div");
-    status.className = "miq-status";
+    root.appendChild(header);
+    root.appendChild(settings);
+    root.appendChild(table);
+    root.appendChild(err);
+    root.appendChild(debug);
+    root.appendChild(foot);
 
-    const left = document.createElement("div");
-    left.className = "miq-row";
+    host.appendChild(root);
 
-    const pill = document.createElement("span");
-    pill.className = "miq-pill";
-    pill.textContent = "idle";
-
-    const last = document.createElement("span");
-    last.className = "miq-muted";
-    last.textContent = "";
-
-    left.appendChild(pill);
-    left.appendChild(last);
-
-    const right = document.createElement("div");
-    right.className = "miq-row";
-
-    const countdown = document.createElement("span");
-    countdown.className = "miq-muted";
-    countdown.textContent = "";
-
-    right.appendChild(countdown);
-
-    status.appendChild(left);
-    status.appendChild(right);
-
-    wrap.appendChild(top);
-    wrap.appendChild(main);
-    wrap.appendChild(status);
-
-    host.appendChild(wrap);
-
-    return {
-      wrap,
-      nameEl,
-      hintEl,
-      refreshBtn,
-      line1,
-      sub,
-      pill,
-      last,
-      countdown,
-      debugBox
-    };
+    return { root: root, hl: hl, hc: hc, hr: hr, refreshBtn: refreshBtn, settings: settings, table: table, err: err, debug: debug, footL: footL, footR: footR };
   }
 
-  function render(state) {
-    const ui = state.ui;
-    const s = state.settings;
-
-    ui.nameEl.textContent = s.masjid && s.masjid.name ? s.masjid.name : DEFAULTS.masjid.name;
-    ui.hintEl.textContent = s.masjid && s.masjid.locationHint ? s.masjid.locationHint : "";
-
-    ui.line1.className = "miq-line1 " + (s.display && s.display.largeTypography ? "miq-big" : "miq-med");
-
-    const arab = s.display && s.display.showArabicLabel ? " (إقامة)" : "";
-    const next = state.next;
-
-    if (state.error) {
-      ui.pill.textContent = "error";
-      ui.last.textContent = state.lastFetchAt ? "last: " + state.lastFetchAt.toLocaleTimeString() : "";
-      ui.line1.textContent = "⚠ " + state.error;
-      ui.sub.textContent = "Time until Iqama" + arab + ". Not Adhan.";
-      ui.countdown.textContent = "";
-      ui.debugBox.style.display = state.settings.debug && state.settings.debug.showParseDetails ? "block" : "none";
-      ui.debugBox.textContent = state.debugText || "";
-      return;
-    }
-
-    if (!next) {
-      ui.pill.textContent = state.status || "idle";
-      ui.last.textContent = state.lastFetchAt ? "last: " + state.lastFetchAt.toLocaleTimeString() : "";
-      ui.line1.textContent = "⏱ No upcoming Iqama today" + arab;
-      ui.sub.textContent = "This tile tracks Iqama" + arab + " (not Adhan).";
-      ui.countdown.textContent = "";
-      ui.debugBox.style.display = state.settings.debug && state.settings.debug.showParseDetails ? "block" : "none";
-      ui.debugBox.textContent = state.debugText || "";
-      return;
-    }
-
-    const now = nowDate(state.ctx);
-    const mins = minutesUntil(next.iqamaDate, now);
-    const diffMs = next.iqamaDate.getTime() - now.getTime();
-
-    ui.pill.textContent = state.status || "ok";
-    ui.last.textContent = state.lastFetchAt ? "last: " + state.lastFetchAt.toLocaleTimeString() : "";
-
-    const pName = (state.settings.display && state.settings.display.showNextPrayerName) ? next.name : "";
-    const nextPart = pName ? ("Next: " + pName + " • ") : "";
-    ui.sub.textContent = nextPart + "Time until Iqama" + arab + " (not Adhan).";
-
-    if (mins >= 0) {
-      ui.line1.textContent = "⏱ " + mins + " minute" + (mins === 1 ? "" : "s") + " until Iqama" + arab;
-    } else {
-      // negative time handling
-      if (state.settings.behavior && state.settings.behavior.negativeTimeHandling === "showLateBy") {
-        const late = Math.abs(mins);
-        ui.line1.textContent = "⏱ Late by " + late + " minute" + (late === 1 ? "" : "s") + " (Iqama" + arab + ")";
-      } else {
-        ui.line1.textContent = "⏱ 0 minutes until Iqama" + arab;
-      }
-    }
-
-    // small HH:MM:SS countdown display (always deterministic)
-    ui.countdown.textContent = diffMs > 0 ? fmtHMS(diffMs) : (state.settings.behavior && state.settings.behavior.negativeTimeHandling === "showLateBy" ? ("-" + fmtHMS(-diffMs)) : "00:00:00");
-
-    ui.debugBox.style.display = state.settings.debug && state.settings.debug.showParseDetails ? "block" : "none";
-    ui.debugBox.textContent = state.debugText || "";
+  function showSettings(state, show) {
+    state.showSettings = !!show;
+    state.ui.settings.style.display = state.showSettings ? "block" : "none";
+    // Keep table visible even when settings open? We'll hide to avoid confusion.
+    state.ui.table.style.display = state.showSettings ? "none" : "flex";
+    state.ui.err.style.display = (state.showSettings ? "none" : (state.error ? "block" : "none"));
+    state.ui.debug.style.display = "none";
   }
 
-  function setStatus(state, status, errorMsg) {
-    state.status = status;
-    state.error = errorMsg || "";
-    render(state);
-  }
+  function buildSettingsPanel(state) {
+    var ctx = state.ctx;
+    var ui = state.ui;
+    var current = getAllSettings(ctx);
 
-  async function refresh(state, reason) {
-    const s = state.settings;
-    const url = s.feed && s.feed.url ? String(s.feed.url).trim() : "";
-    if (!url) {
-      setStatus(state, "error", "Missing Feed URL (configure in ⚙️)");
-      return;
-    }
+    ui.settings.innerHTML = "";
 
-    setStatus(state, "fetching", "");
-    state.debugText = "";
-
-    try {
-      const xml = await fetchWithTimeout(url, 12000);
-      const parsed = parseRss(xml);
-      const built = buildScheduleFromRss(parsed);
-      const now = nowDate(state.ctx);
-      const next = pickNextIqama(built.schedule, now);
-
-      state.lastFetchAt = new Date();
-      state.next = next;
-      state.schedule = built.schedule;
-
-      // Debug details
-      const dbg = [];
-      if (state.settings.debug && state.settings.debug.showLastFetch) {
-        dbg.push("reason=" + (reason || "auto"));
-        dbg.push("itemTitle=" + parsed.rawTitle.trim());
-        dbg.push("ymd=" + parsed.ymd);
-      }
-      if (built.corrections && built.corrections.length) {
-        for (const c of built.corrections) {
-          dbg.push("CORRECT " + c.prayer + ": " + c.from + " -> " + c.to);
-        }
-      }
-      if (state.settings.debug && state.settings.debug.showParseDetails) {
-        dbg.push("schedule=" + built.schedule.map((e) => e.name + "@" + e.iqamaDate.toLocaleTimeString()).join(", "));
-      }
-      state.debugText = dbg.join("\n");
-
-      state.error = "";
-      state.status = "ok";
-      render(state);
-    } catch (e) {
-      state.lastFetchAt = state.lastFetchAt || null;
-      state.next = null;
-      state.schedule = [];
-      const msg =
-        (e && e.name === "AbortError")
-          ? "Fetch timed out (possible CORS/offline)"
-          : "Feed unreachable / blocked / invalid RSS";
-      state.debugText = (state.settings.debug && state.settings.debug.showParseDetails) ? ("error=" + String(e && e.message ? e.message : e)) : "";
-      setStatus(state, "error", msg);
-    }
-  }
-
-  function startTimers(state) {
-    stopTimers(state);
-
-    // 1s tick for countdown UI (no re-fetch)
-    state._tick = setInterval(() => {
-      if (!state) return;
-      if (!state.next) return;
-      // Render is cheap; also keeps countdown moving
-      render(state);
-    }, 1000);
-
-    // periodic refresh
-    const sec = clamp(state.settings.refreshSeconds, 10, 3600);
-    state._refresh = setInterval(() => {
-      refresh(state, "timer");
-    }, sec * 1000);
-
-    // refresh on visibility return (nice-to-have, safe)
-    state._vis = () => {
-      if (!document.hidden) refresh(state, "visibility");
-    };
-    document.addEventListener("visibilitychange", state._vis);
-  }
-
-  function stopTimers(state) {
-    if (!state) return;
-    if (state._tick) clearInterval(state._tick);
-    if (state._refresh) clearInterval(state._refresh);
-    if (state._vis) document.removeEventListener("visibilitychange", state._vis);
-    state._tick = null;
-    state._refresh = null;
-    state._vis = null;
-  }
-
-  // ---- Settings UI ----
-
-  function buildSettingsUI(ctx, shellLike) {
-    const body = shellLike && shellLike.body ? shellLike.body : shellLike;
-    if (!body) return;
-
-    const current = getAllSettings(ctx);
-
-    body.innerHTML = "";
-    const form = document.createElement("form");
-    form.className = "miq-form";
-
-    const h = document.createElement("div");
-    h.style.fontWeight = "700";
+    var h = document.createElement("h3");
     h.textContent = "Masjid Iqama — Settings";
-    form.appendChild(h);
 
-    const note = document.createElement("div");
-    note.className = "miq-note";
-    note.innerHTML =
-      "This gadget shows <b>time until Iqama (إقامة)</b> (not Adhan). RSS parsing is deterministic. A bounded correction may fix obvious AM/PM typos (e.g., 03:15 → 15:15) only when Iqama would otherwise be before its Adhan.";
-    form.appendChild(note);
+    var form = document.createElement("form");
 
-    const grid = document.createElement("div");
+    var grid = document.createElement("div");
     grid.className = "miq-grid";
 
-    // Masjid name
-    const masjidNameWrap = document.createElement("div");
-    const masjidNameLabel = document.createElement("label");
-    masjidNameLabel.textContent = "Masjid name (required)";
-    const masjidNameInput = document.createElement("input");
-    masjidNameInput.className = "miq-in";
-    masjidNameInput.type = "text";
-    masjidNameInput.value = (current.masjid && current.masjid.name) || "";
-    masjidNameWrap.appendChild(masjidNameLabel);
-    masjidNameWrap.appendChild(masjidNameInput);
-
-    // Location hint
-    const locWrap = document.createElement("div");
-    const locLabel = document.createElement("label");
-    locLabel.textContent = "Location hint (optional)";
-    const locInput = document.createElement("input");
-    locInput.className = "miq-in";
-    locInput.type = "text";
-    locInput.value = (current.masjid && current.masjid.locationHint) || "";
-    locWrap.appendChild(locLabel);
-    locWrap.appendChild(locInput);
-
-    // Feed URL
-    const urlWrap = document.createElement("div");
-    urlWrap.style.gridColumn = "1 / span 2";
-    const urlLabel = document.createElement("label");
-    urlLabel.textContent = "RSS Feed URL (required)";
-    const urlInput = document.createElement("input");
-    urlInput.className = "miq-in";
-    urlInput.type = "text";
-    urlInput.value = (current.feed && current.feed.url) || "";
-    urlWrap.appendChild(urlLabel);
-    urlWrap.appendChild(urlInput);
-
-    // Refresh seconds
-    const refWrap = document.createElement("div");
-    const refLabel = document.createElement("label");
-    refLabel.textContent = "Refresh seconds (10–3600)";
-    const refInput = document.createElement("input");
-    refInput.className = "miq-in";
-    refInput.type = "number";
-    refInput.min = "10";
-    refInput.max = "3600";
-    refInput.step = "1";
-    refInput.value = String(clamp(current.refreshSeconds, 10, 3600));
-    refWrap.appendChild(refLabel);
-    refWrap.appendChild(refInput);
-
-    // toggles
-    const togglesWrap = document.createElement("div");
-    const tLabel = document.createElement("label");
-    tLabel.textContent = "Display";
-    const tBox = document.createElement("div");
-    tBox.style.display = "flex";
-    tBox.style.flexDirection = "column";
-    tBox.style.gap = "6px";
-
-    function mkCheck(labelText, initial) {
-      const row = document.createElement("label");
-      row.style.display = "flex";
-      row.style.alignItems = "center";
-      row.style.gap = "8px";
-      row.style.fontSize = "12px";
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.checked = !!initial;
-      const sp = document.createElement("span");
-      sp.textContent = labelText;
-      row.appendChild(cb);
-      row.appendChild(sp);
-      return { row, cb };
+    function mkInput(labelText, value, type, full) {
+      var wrap = document.createElement("label");
+      wrap.textContent = labelText;
+      var inp = document.createElement("input");
+      inp.type = type || "text";
+      inp.value = value || "";
+      wrap.appendChild(inp);
+      if (full) wrap.style.gridColumn = "1 / span 2";
+      return { wrap: wrap, inp: inp };
     }
 
-    const cArabic = mkCheck("Show Arabic label (إقامة)", current.display && current.display.showArabicLabel);
-    const cNext = mkCheck("Show next prayer name", current.display && current.display.showNextPrayerName);
-    const cBig = mkCheck("Large typography", current.display && current.display.largeTypography);
-    tBox.appendChild(cArabic.row);
-    tBox.appendChild(cNext.row);
-    tBox.appendChild(cBig.row);
+    var masjidName = mkInput("Masjid name (required)", (current.masjid && current.masjid.name) || "", "text", false);
+    var locHint = mkInput("Location hint (optional)", (current.masjid && current.masjid.locationHint) || "", "text", false);
+    var feedUrl = mkInput("RSS Feed URL (required)", (current.feed && current.feed.url) || "", "text", true);
+    var refreshSec = mkInput("Refresh seconds (10–3600)", String(clamp(current.refreshSeconds, 10, 3600)), "number", false);
+    refreshSec.inp.min = "10";
+    refreshSec.inp.max = "3600";
 
-    togglesWrap.appendChild(tLabel);
-    togglesWrap.appendChild(tBox);
+    grid.appendChild(masjidName.wrap);
+    grid.appendChild(locHint.wrap);
+    grid.appendChild(feedUrl.wrap);
+    grid.appendChild(refreshSec.wrap);
 
-    // debug toggles
-    const dbgWrap = document.createElement("div");
-    const dbgLabel = document.createElement("label");
-    dbgLabel.textContent = "Debug";
-    const dbgBox = document.createElement("div");
-    dbgBox.style.display = "flex";
-    dbgBox.style.flexDirection = "column";
-    dbgBox.style.gap = "6px";
+    var toggles = document.createElement("label");
+    toggles.textContent = "Show Arabic label (إقامة)";
+    var cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = !!(current.display && current.display.showArabicLabel);
+    toggles.appendChild(cb);
 
-    const dFetch = mkCheck("Show last fetch reason/title", current.debug && current.debug.showLastFetch);
-    const dParse = mkCheck("Show parse details & corrections", current.debug && current.debug.showParseDetails);
-    dbgBox.appendChild(dFetch.row);
-    dbgBox.appendChild(dParse.row);
+    var dbg = document.createElement("label");
+    dbg.textContent = "Debug parse details";
+    var cbDbg = document.createElement("input");
+    cbDbg.type = "checkbox";
+    cbDbg.checked = !!(current.debug && current.debug.showParseDetails);
+    dbg.appendChild(cbDbg);
 
-    dbgWrap.appendChild(dbgLabel);
-    dbgWrap.appendChild(dbgBox);
+    grid.appendChild(toggles);
+    grid.appendChild(dbg);
 
-    grid.appendChild(masjidNameWrap);
-    grid.appendChild(locWrap);
-    grid.appendChild(urlWrap);
-    grid.appendChild(refWrap);
-    grid.appendChild(togglesWrap);
-    grid.appendChild(dbgWrap);
-
-    form.appendChild(grid);
-
-    const actions = document.createElement("div");
+    var actions = document.createElement("div");
     actions.className = "miq-actions";
 
-    const resetBtn = document.createElement("button");
+    var closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.textContent = "Close";
+
+    var resetBtn = document.createElement("button");
     resetBtn.type = "button";
-    resetBtn.className = "miq-btn";
     resetBtn.textContent = "Reset";
 
-    const saveBtn = document.createElement("button");
+    var saveBtn = document.createElement("button");
     saveBtn.type = "submit";
-    saveBtn.className = "miq-btn";
     saveBtn.textContent = "Save";
 
+    actions.appendChild(closeBtn);
     actions.appendChild(resetBtn);
     actions.appendChild(saveBtn);
+
+    form.appendChild(grid);
     form.appendChild(actions);
 
-    resetBtn.addEventListener("click", () => {
-      resetSettings(ctx);
-      // Re-render panel to reflect defaults after host resets
-      buildSettingsUI(ctx, shellLike);
+    closeBtn.addEventListener("click", function () {
+      showSettings(state, false);
+      render(state);
     });
 
-    form.addEventListener("submit", (e) => {
-      e.preventDefault();
+    resetBtn.addEventListener("click", function () {
+      resetSettings(ctx);
+      state.settings = getAllSettings(ctx);
+      showSettings(state, false);
+      render(state);
+      // trigger a refresh because feed/url could reset
+      refresh(state, "reset");
+    });
 
-      const patch = {
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var patch = {
         masjid: {
-          name: String(masjidNameInput.value || "").trim(),
-          locationHint: String(locInput.value || "").trim()
+          name: String(masjidName.inp.value || "").trim() || DEFAULTS.masjid.name,
+          locationHint: String(locHint.inp.value || "").trim()
         },
         feed: {
-          url: String(urlInput.value || "").trim(),
+          url: String(feedUrl.inp.value || "").trim() || DEFAULTS.feed.url,
           mode: "rss",
           parseStrategy: "auto"
         },
-        refreshSeconds: clamp(refInput.value, 10, 3600),
-        display: {
-          showArabicLabel: !!cArabic.cb.checked,
-          showNextPrayerName: !!cNext.cb.checked,
-          largeTypography: !!cBig.cb.checked
-        },
-        debug: {
-          showLastFetch: !!dFetch.cb.checked,
-          showParseDetails: !!dParse.cb.checked
-        }
+        refreshSeconds: clamp(refreshSec.inp.value, 10, 3600),
+        display: { showArabicLabel: !!cb.checked, largeTypography: true },
+        debug: { showParseDetails: !!cbDbg.checked }
       };
 
-      // Basic guard: keep required fields non-empty (but do not block saving entirely)
-      if (!patch.masjid.name) patch.masjid.name = DEFAULTS.masjid.name;
-      if (!patch.feed.url) patch.feed.url = DEFAULTS.feed.url;
-
       setSettings(ctx, patch);
-      // Portal/chrome own dialog closing semantics. We just persist.
+      state.settings = getAllSettings(ctx);
+      showSettings(state, false);
+      render(state);
+      refresh(state, "save");
     });
 
-    body.appendChild(form);
+    ui.settings.appendChild(h);
+    ui.settings.appendChild(form);
   }
 
-  // ---- Lifecycle ----
+  function render(state) {
+    var ui = state.ui;
+    var s = state.settings;
 
+    // Header
+    ui.hc.textContent = (s.masjid && s.masjid.name) ? s.masjid.name : DEFAULTS.masjid.name;
+    ui.hr.textContent = (s.display && s.display.showArabicLabel) ? "إقامة" : "";
+
+    if (state.showSettings) {
+      ui.footL.textContent = "";
+      ui.footR.textContent = "";
+      return;
+    }
+
+    // Error
+    if (state.error) {
+      ui.err.style.display = "block";
+      ui.err.innerHTML = "<strong>⚠</strong> " + esc(state.error);
+      ui.table.innerHTML = "";
+      ui.footL.textContent = "";
+      ui.footR.textContent = (state.lastFetchAt ? ("Last updated " + state.lastFetchAt.toLocaleTimeString()) : "");
+      ui.debug.style.display = (s.debug && s.debug.showParseDetails) ? "block" : "none";
+      ui.debug.textContent = (s.debug && s.debug.showParseDetails) ? (state.debugText || "") : "";
+      return;
+    }
+
+    ui.err.style.display = "none";
+    ui.debug.style.display = (s.debug && s.debug.showParseDetails) ? "block" : "none";
+    ui.debug.textContent = (s.debug && s.debug.showParseDetails) ? (state.debugText || "") : "";
+
+    var rows = state.rows || [];
+    var now = nowDate();
+    var interval = computeInterval(state, now);
+
+    ui.table.innerHTML = "";
+	  const hdr = document.createElement("div");
+		hdr.className = "miq-row miq-head";
+		hdr.innerHTML = `
+		<div>Prayer</div>
+		<div>Adhan</div>
+		<div>Iqama</div>
+		`;
+		ui.table.appendChild(hdr);
+    if (!rows.length || !interval || !interval.next) {
+      ui.footL.textContent = "";
+      ui.footR.textContent = (state.lastFetchAt ? ("Last updated " + state.lastFetchAt.toLocaleTimeString()) : "");
+      return;
+    }
+
+    var nextName = interval.nextName;
+    var prevName = interval.prevName;
+
+    function addPrayerRow(r, isNext) {
+      var row = document.createElement("div");
+      row.className = "miq-row" + (isNext ? " miq-next" : "");
+      if (s.display && s.display.largeTypography) row.style.fontSize = "14px";
+
+      var pr = document.createElement("div");
+      pr.className = "miq-pr";
+	  pr.textContent = (r.name === "Fajar") ? "Fajr" : r.name;
+
+
+      var ad = document.createElement("div");
+      ad.className = "miq-ad";
+      ad.textContent = r.adhanStr.slice(0, 5);
+
+      var iq = document.createElement("div");
+      iq.className = "miq-iq";
+      iq.innerHTML = "<strong>" + esc(r.iqamaStr.slice(0, 5)) + "</strong>";
+
+      row.appendChild(pr);
+      row.appendChild(ad);
+      row.appendChild(iq);
+      ui.table.appendChild(row);
+    }
+
+    function addIntervalBar(prev, next) {
+      if (!prev || !next) return;
+
+      var now2 = nowDate();
+      var totalMs = Math.max(1, next.iqamaDate.getTime() - prev.iqamaDate.getTime());
+      var remainMs = Math.max(0, next.iqamaDate.getTime() - now2.getTime());
+      var pctRemain = clamp(remainMs / totalMs, 0, 1); // 1 => just after prev, 0 => late
+
+      var pctText = Math.round(pctRemain * 100) + "%";
+
+	  var urgent = remainMs < (20 * 60 * 1000);
+
+      var timeText = under10m ? fmtMMSS(remainMs) : fmtHHMM(remainMs);
+      var labelText = "⏱ " + timeText + " left";
+
+      var container = document.createElement("div");
+      container.className = "miq-interval";
+
+      var line = document.createElement("div");
+      line.className = "miq-barLine";
+
+      var bar = document.createElement("div");
+      bar.className = "miq-bar";
+
+	  if (urgent) bar.classList.add("miq-urgent");
+
+
+      var fill = document.createElement("div");
+      fill.className = "miq-barFill";
+      fill.style.width = (pctRemain * 100).toFixed(2) + "%";
+
+      var label = document.createElement("div");
+      label.className = "miq-barLabel";
+
+      // float label to side with more remaining space
+      if (pctRemain >= 0.55) {
+        label.style.left = "0px";
+      } else {
+        label.style.right = "0px";
+      }
+      label.textContent = labelText;
+
+      bar.appendChild(fill);
+      bar.appendChild(label);
+
+      var pct = document.createElement("div");
+      pct.className = "miq-barPct";
+      pct.textContent = pctText;
+
+      line.appendChild(bar);
+      line.appendChild(pct);
+      container.appendChild(line);
+      ui.table.appendChild(container);
+
+      // footer refinements
+      ui.footL.textContent = String(minutesRemaining(remainMs)) + " minutes remaining";
+    }
+
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      addPrayerRow(r, (nextName && r.name === nextName));
+      if (prevName && r.name === prevName) {
+        addIntervalBar(interval.prev, interval.next);
+      }
+    }
+
+    // If we couldn't insert (prev missing), still compute footer
+    if (!prevName) {
+      var remainMs2 = Math.max(0, interval.next.iqamaDate.getTime() - now.getTime());
+      ui.footL.textContent = String(minutesRemaining(remainMs2)) + " minutes remaining";
+    }
+
+    ui.footR.textContent = (state.lastFetchAt ? ("Last updated " + state.lastFetchAt.toLocaleTimeString()) : "");
+  }
+
+  // ----------------------------
+  // Runtime
+  // ----------------------------
+  function setError(state, msg, detail) {
+    state.error = msg || "";
+    state.debugText = detail || "";
+    render(state);
+  }
+
+  function clearError(state) {
+    state.error = "";
+    state.debugText = "";
+  }
+
+  function refresh(state, reason) {
+    var s = state.settings;
+    var url = (s.feed && s.feed.url) ? String(s.feed.url).trim() : "";
+    if (!url) {
+      setError(state, "Missing Feed URL (configure in ⚙️)");
+      return;
+    }
+
+    state.lastFetchReason = reason || "";
+
+    fetchWithTimeout(url, 15000)
+      .then(function (txt) {
+        state.lastFetchAt = nowDate();
+        clearError(state);
+
+        var parsed = parseRss(txt);
+        var schedule = buildSchedule(parsed);
+        state.ymd = parsed.ymd;
+        state.rows = schedule.rows;
+
+        // Debug details
+        if (s.debug && s.debug.showParseDetails) {
+          var lines = [];
+          lines.push("RSS title: " + parsed.rawTitle);
+          lines.push("YMD: " + parsed.ymd);
+          lines.push("Reason: " + (reason || ""));
+          if (schedule.corrections.length) {
+            lines.push("Corrections:");
+            schedule.corrections.forEach(function (c) {
+              lines.push("- " + c.prayer + ": " + c.from + " → " + c.to);
+            });
+          }
+          state.debugText = lines.join("\n");
+        }
+
+        render(state);
+      })
+      .catch(function (e) {
+        setError(state, "RSS fetch failed (CORS/offline?)", String(e && e.message ? e.message : e));
+      });
+  }
+
+  function updateTickMode(state) {
+    var now = nowDate();
+    var interval = computeInterval(state, now);
+    if (!interval || !interval.next || !interval.prev) return;
+
+    var remainMs = Math.max(0, interval.next.iqamaDate.getTime() - now.getTime());
+    var wantFast = remainMs < (10 * 60 * 1000);
+    var newMs = wantFast ? 1000 : 10000;
+
+    if (state._tickMs !== newMs) {
+      state._tickMs = newMs;
+      if (state._tick) {
+        clearInterval(state._tick);
+        state._tick = null;
+      }
+      state._tick = setInterval(function () {
+        // midnight refresh check
+        try {
+          if (state.ymd) {
+            var d = nowDate();
+            var y = d.getFullYear();
+            var m = String(d.getMonth() + 1).padStart(2, "0");
+            var dd = String(d.getDate()).padStart(2, "0");
+            var ymdNow = y + "-" + m + "-" + dd;
+            if (ymdNow !== state.ymd) {
+              refresh(state, "midnight");
+            }
+          }
+        } catch (e) {}
+        render(state);
+        updateTickMode(state);
+      }, state._tickMs);
+    }
+  }
+
+  function start(state) {
+    // fetch cadence
+    if (state._refresh) clearInterval(state._refresh);
+    state._refresh = setInterval(function () {
+      refresh(state, "auto");
+    }, clamp(state.settings.refreshSeconds, 10, 3600) * 1000);
+
+    // tick cadence
+    state._tickMs = null;
+    updateTickMode(state);
+  }
+
+  function stop(state) {
+    if (state._tick) { clearInterval(state._tick); state._tick = null; }
+    if (state._refresh) { clearInterval(state._refresh); state._refresh = null; }
+  }
+
+  // ----------------------------
+  // Lifecycle (Portal expects mount(host, ctx))
+  // ----------------------------
   function mount(host, ctx) {
     host.innerHTML = "";
-    const ui = buildUI(host);
 
-    const state = {
-      ctx,
-      host,
-      ui,
+    var ui = buildUI(host);
+    var state = {
+      ctx: ctx,
+      host: host,
+      ui: ui,
       settings: getAllSettings(ctx),
-      status: "idle",
-      error: "",
+      rows: [],
+      ymd: null,
       lastFetchAt: null,
-      schedule: [],
-      next: null,
+      lastFetchReason: "",
+      error: "",
       debugText: "",
+      showSettings: false,
       _tick: null,
-      _refresh: null,
-      _vis: null
+      _tickMs: null,
+      _refresh: null
     };
 
-    // Keep state per instance on host only (namespaced)
     host.__miq_state = state;
 
-    ui.refreshBtn.addEventListener("click", () => refresh(state, "manual"));
+    ui.refreshBtn.addEventListener("click", function () {
+      refresh(state, "manual");
+    });
 
-    // initial render
     render(state);
-
-    // Start timers and do first fetch
-    startTimers(state);
     refresh(state, "mount");
+    start(state);
   }
 
-  function unmount(host /*, ctx */) {
-    const state = host && host.__miq_state;
-    if (state) {
-      stopTimers(state);
-    }
+  function unmount(host) {
+    var state = host && host.__miq_state;
+    if (state) stop(state);
     if (host) {
       delete host.__miq_state;
       host.innerHTML = "";
     }
   }
 
+  // Portal gear icon: toggle in-gadget settings panel (EmbedWeb/Flashcards pattern)
   function onSettingsRequested(ctx, shell) {
-    buildSettingsUI(ctx, shell);
+    var host = (shell && (shell.body || shell.slot)) || null;
+    var root = host;
+    if (!root) return;
+
+    // Find our mounted state
+    var state = root.__miq_state || (root.querySelector && root.querySelector(".miq-root") && root.__miq_state) || null;
+    // Fallback: sometimes shell.body is inside host; walk up
+    if (!state && root.closest) {
+      var p = root;
+      while (p && !state) {
+        if (p.__miq_state) state = p.__miq_state;
+        p = p.parentNode;
+      }
+    }
+    if (!state) return;
+
+    // toggle
+    if (!state.showSettings) {
+      state.settings = getAllSettings(state.ctx);
+      buildSettingsPanel(state);
+      showSettings(state, true);
+    } else {
+      showSettings(state, false);
+      render(state);
+    }
   }
 
-  function onInfoClick(ctx, shellLike) {
-    const body = shellLike && shellLike.body ? shellLike.body : shellLike;
-    if (!body) return;
-
-    body.innerHTML = `
-      <div style="padding:10px;font-size:12px;line-height:1.35;">
-        <div style="font-weight:700;margin-bottom:6px;">${esc(manifest.label)} — About</div>
-        <div style="margin-bottom:8px;">
-          This gadget shows <b>time until the next Iqama (إقامة)</b> for the configured Masjid RSS feed.
-          <b>It does not display Adhan countdown</b>.
-        </div>
-        <div style="margin-bottom:8px;">
-          <b>Parsing doctrine:</b> deterministic extraction from RSS item description.
-          A bounded correction may fix obvious AM/PM typos only when an Iqama would otherwise be before its Adhan.
-        </div>
-        <div class="miq-kv">
-          class: ${esc(manifest._class)}<br/>
-          type: ${esc(manifest._type)}<br/>
-          ver: ${esc(manifest._ver)}<br/>
-          capabilities: ${esc((manifest.capabilities || []).join(", "))}
-        </div>
-      </div>
-    `;
+  function onInfoClick(ctx, shell) {
+    // Minimal: toggle settings as help entrypoint if desired.
+    onSettingsRequested(ctx, shell);
   }
 
-  // Register (v1.2.2+ canon)
+  // Register
   window.GADGETS = window.GADGETS || {};
-  window.GADGETS[manifest._class] = {
-    manifest,
-    mount,
-    unmount,
-    onSettingsRequested,
-    onInfoClick
-  };
+  window.GADGETS[manifest._class] = { manifest: manifest, mount: mount, unmount: unmount, onSettingsRequested: onSettingsRequested, onInfoClick: onInfoClick };
 })();
